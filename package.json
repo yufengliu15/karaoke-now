@@ -4,7 +4,8 @@
   "description": "Local-first karaoke practice app: vocal separation, synced lyrics, live pitch feedback",
   "main": "electron/main.js",
   "scripts": {
-    "start": "electron ."
+    "start": "electron .",
+    "test": "node --test \"renderer/tests/*.test.mjs\""
   },
   "license": "MIT",
   "devDependencies": {

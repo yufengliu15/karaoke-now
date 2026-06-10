@@ -32,6 +32,8 @@ npm start
 
 "Add song" → pick an audio file → watch the pipeline chips (tags → Demucs → pitch → lyrics → bundle). First run downloads Demucs/CREPE model weights. The `fast` toggle uses CREPE-tiny for a quicker, rougher contour.
 
+Click a library row to open the **playback screen**: instrumental audio, a scrolling reference pitch lane (canvas, octave gridlines, now-line at 25%), and synced lyrics with the active line highlighted. Space or the button toggles play/pause; the slider seeks. No mic yet — that's Phase 3.
+
 Bundles land in Electron's `userData/songs/<id>/`:
 
 ```
@@ -56,12 +58,26 @@ cd sidecar
 cd sidecar
 .venv/bin/python -m pytest               # fast suite
 .venv/bin/python -m pytest -m slow       # + CREPE-tiny model download
+
+npm test                                 # renderer: LRC parser + pitch-lane geometry
+```
+
+## Dev harness
+
+The renderer + bundles are served over a privileged `app://` scheme (real origin, so ES modules / `fetch` / `<audio>` work under CSP). Env knobs, mainly for headless verification:
+
+```bash
+sidecar/.venv/bin/python scripts/make_synth_bundle.py   # fake bundle in /tmp/karaoke-test-songs
+KARAOKE_SONGS_DIR=/tmp/karaoke-test-songs \
+KARAOKE_SHOT_DIR=/tmp/karaoke-shots \
+KARAOKE_SHOT_HASH="#play/deadbeefdeadbeef?t=12" \
+KARAOKE_SHOT_PLAY=1 npx electron .       # screenshot + playback probe, then quits
 ```
 
 ## Status / roadmap
 
 - [x] **Phase 1 — song pipeline**: file picker → cached bundle (this repo, 2026-06-10)
-- [ ] **Phase 2 — playback screen**: instrumental + scrolling lyrics + reference pitch lane
+- [x] **Phase 2 — playback screen**: instrumental + scrolling lyrics + reference pitch lane (2026-06-10)
 - [ ] **Phase 3 — live mic loop**: AudioWorklet + YIN-WASM, user pitch line over reference, <50ms mic-to-pixel
 - [ ] **Phase 4 — scoring**: in-tune-percent per phrase + session summary
 - Post-MVP: yt-dlp ingest, WhisperX forced-alignment fallback, key transposition

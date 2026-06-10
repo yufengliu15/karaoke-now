@@ -1,8 +1,13 @@
+import { initPlayer, openPlayer, closePlayer } from "./player.mjs";
+
 const songsEl = document.getElementById("songs");
 const stagesEl = document.getElementById("stages");
 const logEl = document.getElementById("log");
 const addBtn = document.getElementById("add");
 const fastEl = document.getElementById("fast");
+const viewLibrary = document.getElementById("view-library");
+const viewPlayer = document.getElementById("view-player");
+const backBtn = document.getElementById("back");
 
 // Mirrors the sidecar's emit() stages, in pipeline order.
 const STAGES = ["probe", "separate", "contour", "lyrics", "bundle"];
@@ -15,6 +20,7 @@ const STAGE_LABELS = {
 };
 
 let busy = false;
+let pendingAutoplay = false;
 
 function esc(s) {
   return String(s ?? "").replace(/[&<>"']/g, (c) => ({
@@ -43,7 +49,7 @@ async function refresh() {
   songsEl.innerHTML = songs
     .map(
       (s) => `
-      <div class="song" data-bundle="${esc(s.bundle)}">
+      <div class="song" data-bundle="${esc(s.bundle)}" data-id="${esc(s.id)}">
         <div class="song-main">
           <span class="song-title">${esc(s.title || "Unknown title")}</span>
           <span class="song-artist">${esc(s.artist || "Unknown artist")}</span>
@@ -59,24 +65,39 @@ async function refresh() {
     .join("");
   for (const el of songsEl.querySelectorAll(".song .reveal")) {
     el.addEventListener("click", (e) => {
+      e.stopPropagation();
       const bundle = e.target.closest(".song").dataset.bundle;
       window.karaoke.revealBundle(bundle);
     });
   }
+  for (const el of songsEl.querySelectorAll(".song")) {
+    el.addEventListener("click", () => {
+      pendingAutoplay = true; // click is the user gesture that allows playback
+      location.hash = `play/${el.dataset.id}`;
+    });
+  }
 }
 
-function setStage(stage, status) {
-  let chip = stagesEl.querySelector(`[data-stage="${stage}"]`);
-  if (!chip) {
-    chip = document.createElement("span");
-    chip.dataset.stage = stage;
-    chip.className = "chip";
-    chip.textContent = STAGE_LABELS[stage] || stage;
-    stagesEl.appendChild(chip);
+// Routing: "" → library, "#play/<id>[?t=<s>]" → player.
+function route() {
+  const m = location.hash.match(/^#play\/([0-9a-f]+)(?:\?t=([\d.]+))?$/);
+  if (m) {
+    viewLibrary.hidden = true;
+    viewPlayer.hidden = false;
+    openPlayer(m[1], { t: Number(m[2] || 0), autoplay: pendingAutoplay });
+  } else {
+    closePlayer();
+    viewPlayer.hidden = true;
+    viewLibrary.hidden = false;
+    refresh();
   }
-  chip.classList.remove("pending", "start", "done", "error", "warn");
-  chip.classList.add(status);
+  pendingAutoplay = false;
 }
+
+window.addEventListener("hashchange", route);
+backBtn.addEventListener("click", () => {
+  location.hash = "";
+});
 
 window.karaoke.onProgress((msg) => {
   setStage(msg.stage, msg.status);
@@ -92,6 +113,19 @@ window.karaoke.onProgress((msg) => {
     log("already processed (cached bundle)");
   }
 });
+
+function setStage(stage, status) {
+  let chip = stagesEl.querySelector(`[data-stage="${stage}"]`);
+  if (!chip) {
+    chip = document.createElement("span");
+    chip.dataset.stage = stage;
+    chip.className = "chip";
+    chip.textContent = STAGE_LABELS[stage] || stage;
+    stagesEl.appendChild(chip);
+  }
+  chip.classList.remove("pending", "start", "done", "error", "warn");
+  chip.classList.add(status);
+}
 
 window.karaoke.onLog((line) => log(line.trimEnd()));
 
@@ -111,4 +145,5 @@ addBtn.addEventListener("click", async () => {
   refresh();
 });
 
-refresh();
+initPlayer();
+route();

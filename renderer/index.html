@@ -7,26 +7,48 @@
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
-  <header>
-    <h1>Karaoke <span class="accent">Now</span></h1>
-    <div class="controls">
-      <label class="fast-toggle" title="tiny CREPE model: faster processing, rougher reference pitch">
-        <input type="checkbox" id="fast" /> fast
-      </label>
-      <button id="add" class="primary">Add song</button>
+  <div id="view-library">
+    <header>
+      <h1>Karaoke <span class="accent">Now</span></h1>
+      <div class="controls">
+        <label class="fast-toggle" title="tiny CREPE model: faster processing, rougher reference pitch">
+          <input type="checkbox" id="fast" /> fast
+        </label>
+        <button id="add" class="primary">Add song</button>
+      </div>
+    </header>
+    <main>
+      <section id="library">
+        <h2>Library</h2>
+        <div id="songs"></div>
+      </section>
+      <section id="activity">
+        <h2>Processing</h2>
+        <div id="stages"></div>
+        <pre id="log"></pre>
+      </section>
+    </main>
+  </div>
+
+  <div id="view-player" hidden>
+    <header>
+      <button id="back" title="Back to library">←</button>
+      <div class="now-playing">
+        <span id="p-title" class="song-title"></span>
+        <span id="p-artist" class="song-artist"></span>
+      </div>
+      <span id="p-clock" class="clock">0:00 / 0:00</span>
+    </header>
+    <div id="stage">
+      <canvas id="lane"></canvas>
+      <div id="lyrics"><p class="empty" id="lyrics-empty" hidden>No synced lyrics for this song — pitch lane only.</p></div>
     </div>
-  </header>
-  <main>
-    <section id="library">
-      <h2>Library</h2>
-      <div id="songs"></div>
-    </section>
-    <section id="activity">
-      <h2>Processing</h2>
-      <div id="stages"></div>
-      <pre id="log"></pre>
-    </section>
-  </main>
-  <script src="app.js"></script>
+    <footer id="transport">
+      <button id="playpause" class="primary" disabled>Play</button>
+      <input id="seek" type="range" min="0" max="0" step="0.1" value="0" />
+    </footer>
+  </div>
+
+  <script type="module" src="app.js"></script>
 </body>
 </html>

@@ -1,9 +1,18 @@
-const { app, BrowserWindow, dialog, ipcMain, shell } = require("electron");
+const { app, BrowserWindow, dialog, ipcMain, net, protocol, shell } = require("electron");
 const { spawn } = require("node:child_process");
 const fs = require("node:fs");
 const path = require("node:path");
+const { pathToFileURL } = require("node:url");
 
 const SIDECAR_DIR = path.join(__dirname, "..", "sidecar");
+const RENDERER_DIR = path.join(__dirname, "..", "renderer");
+
+// Renderer + song bundles are served over one privileged scheme so the page
+// gets a real origin: ES modules, fetch(), and <audio> all same-origin under
+// CSP 'self' (file:// would CORS-block module scripts and fetch).
+protocol.registerSchemesAsPrivileged([
+  { scheme: "app", privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } },
+]);
 
 function sidecarPython() {
   if (process.env.KARAOKE_PY) return process.env.KARAOKE_PY;
@@ -12,9 +21,24 @@ function sidecarPython() {
 }
 
 function songsRoot() {
-  const root = path.join(app.getPath("userData"), "songs");
+  const root = process.env.KARAOKE_SONGS_DIR || path.join(app.getPath("userData"), "songs");
   fs.mkdirSync(root, { recursive: true });
   return root;
+}
+
+function serveFile(root, rel) {
+  const full = path.normalize(path.join(root, rel));
+  if (!full.startsWith(root + path.sep) || !fs.existsSync(full) || !fs.statSync(full).isFile()) {
+    return new Response("not found", { status: 404 });
+  }
+  return net.fetch(pathToFileURL(full).toString());
+}
+
+function handleAppRequest(req) {
+  const url = new URL(req.url);
+  const rel = decodeURIComponent(url.pathname).replace(/^\/+/, "");
+  if (rel.startsWith("songs/")) return serveFile(songsRoot(), rel.slice("songs/".length));
+  return serveFile(RENDERER_DIR, rel || "index.html");
 }
 
 let win;
@@ -30,11 +54,39 @@ function createWindow() {
       nodeIntegration: false,
     },
   });
-  win.loadFile(path.join(__dirname, "..", "renderer", "index.html"));
+  win.loadURL("app://karaoke/index.html" + (process.env.KARAOKE_SHOT_HASH || ""));
+}
+
+// Dev/verification harness: KARAOKE_SHOT_DIR=/tmp/shots [KARAOKE_SHOT_HASH="#play/<id>?t=12"]
+// captures the window after load, then quits.
+function armScreenshot() {
+  if (!process.env.KARAOKE_SHOT_DIR) return;
+  const dir = process.env.KARAOKE_SHOT_DIR;
+  fs.mkdirSync(dir, { recursive: true });
+  win.webContents.on("did-finish-load", () => {
+    setTimeout(async () => {
+      if (process.env.KARAOKE_SHOT_PLAY) {
+        // Playback probe: press play, let it run, report the clock (it only
+        // advances off audio.currentTime, so movement proves audio is playing).
+        const clk = () => win.webContents.executeJavaScript('document.getElementById("p-clock").textContent');
+        await win.webContents.executeJavaScript('document.getElementById("playpause").click()');
+        const before = await clk();
+        await new Promise((r) => setTimeout(r, 3000));
+        console.log(`[karaoke-now] playback probe: "${before}" -> "${await clk()}"`);
+      }
+      const img = await win.webContents.capturePage();
+      const name = process.env.KARAOKE_SHOT_HASH ? "player.png" : "library.png";
+      fs.writeFileSync(path.join(dir, name), img.toPNG());
+      console.log("[karaoke-now] screenshot:", path.join(dir, name));
+      app.quit();
+    }, Number(process.env.KARAOKE_SHOT_DELAY_MS || 1500));
+  });
 }
 
 app.whenReady().then(() => {
+  protocol.handle("app", handleAppRequest);
   createWindow();
+  armScreenshot();
   console.log("[karaoke-now] ready; songs root:", songsRoot());
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
@@ -42,7 +94,7 @@ app.whenReady().then(() => {
 });
 
 app.on("window-all-closed", () => {
-  if (process.platform !== "darwin") app.quit();
+  if (process.platform !== "darwin" || process.env.KARAOKE_SHOT_DIR) app.quit();
 });
 
 ipcMain.handle("pick-audio", async () => {
