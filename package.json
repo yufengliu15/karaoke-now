@@ -1,0 +1,14 @@
+{
+  "name": "karaoke-now",
+  "version": "0.1.0",
+  "description": "Local-first karaoke practice app: vocal separation, synced lyrics, live pitch feedback",
+  "main": "electron/main.js",
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test \"renderer/tests/*.test.mjs\""
+  },
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^36.0.0"
+  }
+}
