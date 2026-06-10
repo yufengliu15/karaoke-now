@@ -5,10 +5,12 @@
   "main": "electron/main.js",
   "scripts": {
     "start": "electron .",
-    "test": "node --test \"renderer/tests/*.test.mjs\""
+    "test": "node --test \"renderer/tests/*.test.mjs\"",
+    "build:wasm": "asc wasm/yin.ts -o renderer/worklet/yin.wasm --optimizeLevel 3 --runtime stub --noAssert"
   },
   "license": "MIT",
   "devDependencies": {
+    "assemblyscript": "^0.28.18",
     "electron": "^36.0.0"
   }
 }

@@ -147,3 +147,77 @@ test("buildNotes: low-confidence frames are unvoiced", () => {
   assert.equal(notes.length, 1);
   assert.ok(notes[0].t1 <= 0.2 + 1e-9);
 });
+
+// --- live user trace (Phase 3) ---------------------------------------------
+
+import { foldMidiToRange, userSegments, pruneSamples } from "../pitchlane.mjs";
+
+test("foldMidiToRange: in-range pitch passes through untouched", () => {
+  assert.equal(foldMidiToRange(64.3, 55, 79), 64.3);
+});
+
+test("foldMidiToRange: octave-down singing folds up into the lane", () => {
+  // Reference lane around C4..C5, singer an octave below.
+  assert.equal(foldMidiToRange(48.5, 60, 84), 60.5);
+  assert.equal(foldMidiToRange(36.5, 60, 84), 60.5);
+});
+
+test("foldMidiToRange: octave-up folds down", () => {
+  assert.equal(foldMidiToRange(91, 60, 84), 79);
+});
+
+test("foldMidiToRange: narrow lane (span < octave) clamps after best fold", () => {
+  const v = foldMidiToRange(50, 60, 66);
+  assert.ok(v >= 60 && v <= 66, `got ${v}`);
+});
+
+test("userSegments: contiguous samples form one polyline", () => {
+  const samples = [
+    { t: 1.0, midi: 60 },
+    { t: 1.05, midi: 60.5 },
+    { t: 1.1, midi: 61 },
+  ];
+  const segs = userSegments(samples, { gapS: 0.25 });
+  assert.equal(segs.length, 1);
+  assert.equal(segs[0].length, 3);
+});
+
+test("userSegments: a breath gap splits the trace", () => {
+  const samples = [
+    { t: 1.0, midi: 60 },
+    { t: 1.05, midi: 60 },
+    { t: 2.0, midi: 62 },
+    { t: 2.05, midi: 62 },
+  ];
+  const segs = userSegments(samples, { gapS: 0.25 });
+  assert.equal(segs.length, 2);
+});
+
+test("userSegments: lone samples (shorter than minPoints) are dropped", () => {
+  const samples = [
+    { t: 1.0, midi: 60 },
+    { t: 2.0, midi: 62 },
+    { t: 2.05, midi: 62 },
+  ];
+  const segs = userSegments(samples, { gapS: 0.25 });
+  assert.equal(segs.length, 1);
+  assert.equal(segs[0][0].midi, 62);
+});
+
+test("userSegments: empty input, empty output", () => {
+  assert.deepEqual(userSegments([], { gapS: 0.25 }), []);
+});
+
+test("pruneSamples: drops everything older than the cutoff, keeps order", () => {
+  const samples = [
+    { t: 1, midi: 60 },
+    { t: 2, midi: 61 },
+    { t: 3, midi: 62 },
+  ];
+  assert.deepEqual(pruneSamples(samples, 2), [
+    { t: 2, midi: 61 },
+    { t: 3, midi: 62 },
+  ]);
+  assert.deepEqual(pruneSamples(samples, 10), []);
+  assert.equal(pruneSamples(samples, 0).length, 3);
+});

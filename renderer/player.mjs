@@ -3,19 +3,36 @@
 // owns the DOM, the <audio> clock, and the rAF render loop.
 
 import { parseLrc, activeLineIndex, wordTimings } from "./lrc.mjs";
-import { buildNotes, fitMidiRange, timeToX, midiToY } from "./pitchlane.mjs";
+import {
+  buildNotes,
+  fitMidiRange,
+  timeToX,
+  midiToY,
+  hzToMidi,
+  foldMidiToRange,
+  userSegments,
+  pruneSamples,
+} from "./pitchlane.mjs";
+import { startMic } from "./mic.mjs";
 
 const WINDOW_S = 8; // seconds of contour visible across the lane
 const LEAD_FRAC = 0.25; // now-line position as a fraction of lane width
+
+// Voicing gates on live mic estimates: YIN clarity on real singing sits well
+// above 0.6; the RMS floor keeps silence and breath off the lane.
+const CLARITY_MIN = 0.6;
+const RMS_FLOOR = 0.005;
+const TRACE_GAP_S = 0.25; // breath gap that splits the drawn trace
 
 const els = {};
 let css = {};
 let state = null;
 let rafId = 0;
 let currentSession = null;
+let mic = null; // live mic engine, one at a time, stopped on player close
 
 export function initPlayer() {
-  for (const id of ["view-player", "back", "p-title", "p-artist", "p-clock", "lane", "lyrics", "lyrics-empty", "playpause", "seek"]) {
+  for (const id of ["view-player", "back", "p-title", "p-artist", "p-clock", "lane", "lyrics", "lyrics-empty", "playpause", "mic", "mic-note", "seek"]) {
     els[id.replace(/-(\w)/g, (_, c) => c.toUpperCase())] = document.getElementById(id);
   }
   const style = getComputedStyle(document.body);
@@ -28,6 +45,7 @@ export function initPlayer() {
   };
 
   els.playpause.addEventListener("click", togglePlay);
+  els.mic.addEventListener("click", toggleMic);
   document.addEventListener("keydown", (e) => {
     if (state && e.code === "Space" && e.target.tagName !== "INPUT") {
       e.preventDefault();
@@ -35,7 +53,9 @@ export function initPlayer() {
     }
   });
   els.seek.addEventListener("input", () => {
-    if (state) state.audio.currentTime = Number(els.seek.value);
+    if (!state) return;
+    state.audio.currentTime = Number(els.seek.value);
+    state.micSamples = []; // trace times are song-relative; a seek orphans them
   });
   els.seek.addEventListener("pointerdown", () => state && (state.scrubbing = true));
   els.seek.addEventListener("pointerup", () => state && (state.scrubbing = false));
@@ -68,6 +88,7 @@ export async function openPlayer(id, { t = 0, autoplay = false } = {}) {
     words: [],
     wordIdx: -1,
     scrubbing: false,
+    micSamples: [], // live {t, midi} ring, pruned to the visible past
     // Streamed wav reports duration=Infinity until fully buffered; meta.json is the truth.
     durationS: meta?.duration_s || 0,
   };
@@ -102,6 +123,7 @@ export async function openPlayer(id, { t = 0, autoplay = false } = {}) {
 export function closePlayer() {
   currentSession = null;
   cancelAnimationFrame(rafId);
+  stopMic();
   if (state) {
     state.audio.pause();
     state.audio.removeAttribute("src");
@@ -116,6 +138,64 @@ export function closePlayer() {
 function togglePlay() {
   if (!state) return;
   state.audio.paused ? state.audio.play().catch(() => {}) : state.audio.pause();
+}
+
+async function toggleMic() {
+  if (mic) {
+    stopMic();
+    return;
+  }
+  els.mic.disabled = true;
+  try {
+    const fakeHz = Number(window.karaoke.fakeMicHz || 0);
+    mic = await startMic({ onSample: onMicSample, fakeHz });
+    (window.__micProbe ??= { messages: 0, voiced: 0, f0s: [] }).latencyMs = mic.latencyMs;
+    els.mic.textContent = "Mic on";
+    els.mic.classList.add("on");
+  } catch (err) {
+    console.error("mic start failed:", err);
+    els.micNote.textContent = "mic blocked";
+  }
+  els.mic.disabled = false;
+}
+
+function stopMic() {
+  if (mic) mic.stop();
+  mic = null;
+  els.mic.textContent = "Mic off";
+  els.mic.classList.remove("on");
+  els.micNote.textContent = "";
+}
+
+function onMicSample(d) {
+  // Probe: lets the headless harness assert the loop end to end (fake mic in,
+  // ~fakeHz out). Negligible cost when nobody reads it.
+  const probe = (window.__micProbe ??= { messages: 0, voiced: 0, f0s: [] });
+  probe.messages++;
+
+  const voiced = d.f0 > 0 && d.clarity >= CLARITY_MIN && d.rms >= RMS_FLOOR;
+  if (!voiced) {
+    if (els.micNote.textContent) els.micNote.textContent = "";
+    return;
+  }
+  probe.voiced++;
+  probe.f0s.push(Math.round(d.f0 * 10) / 10);
+  if (probe.f0s.length > 200) probe.f0s.shift();
+
+  if (!state || !mic) return;
+  const midi = hzToMidi(d.f0);
+  els.micNote.textContent = noteName(midi);
+  if (state.audio.paused) return;
+
+  // d.t is the ctx time of the analysis-window center; subtracting its age
+  // from the song clock pins the sample to the moment it was actually sung.
+  const songT = state.audio.currentTime - Math.max(0, mic.ctx.currentTime - d.t);
+  state.micSamples.push({ t: songT, midi });
+}
+
+function noteName(midi) {
+  const m = Math.round(midi);
+  return `${NOTE_NAMES[((m % 12) + 12) % 12]}${Math.floor(m / 12) - 1}`;
 }
 
 async function fetchJson(url) {
@@ -155,6 +235,9 @@ function tick() {
   rafId = requestAnimationFrame(tick);
   const now = state.audio.currentTime;
 
+  if (state.micSamples.length) {
+    state.micSamples = pruneSamples(state.micSamples, now - LEAD_FRAC * WINDOW_S - 0.5);
+  }
   drawLane(now);
 
   const clock = `${fmtClock(now)} / ${fmtClock(state.durationS)}`;
@@ -279,6 +362,32 @@ function drawLane(now) {
       ctx.fill();
     }
     ctx.restore();
+  }
+
+  // Live user trace: green polyline over the sung region, clipped at the
+  // now-line. Octave-folded into the lane so off-octave singing still lands
+  // on the reference instead of off-canvas.
+  if (state.micSamples.length) {
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(0, 0, nowX, height);
+    ctx.clip();
+    ctx.strokeStyle = css.ok;
+    ctx.lineWidth = 2.5;
+    ctx.lineJoin = "round";
+    ctx.lineCap = "round";
+    ctx.globalAlpha = 0.95;
+    for (const seg of userSegments(state.micSamples, { gapS: TRACE_GAP_S })) {
+      ctx.beginPath();
+      for (let i = 0; i < seg.length; i++) {
+        const x = timeToX(seg[i].t, now, geo);
+        const y = midiToY(foldMidiToRange(seg[i].midi, lo, hi), yOpts);
+        i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+      }
+      ctx.stroke();
+    }
+    ctx.restore();
+    ctx.globalAlpha = 1;
   }
 
   // Note labels on top of the bars.
