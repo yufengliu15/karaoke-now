@@ -1,0 +1,32 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self'" />
+  <title>Karaoke Now</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header>
+    <h1>Karaoke <span class="accent">Now</span></h1>
+    <div class="controls">
+      <label class="fast-toggle" title="tiny CREPE model: faster processing, rougher reference pitch">
+        <input type="checkbox" id="fast" /> fast
+      </label>
+      <button id="add" class="primary">Add song</button>
+    </div>
+  </header>
+  <main>
+    <section id="library">
+      <h2>Library</h2>
+      <div id="songs"></div>
+    </section>
+    <section id="activity">
+      <h2>Processing</h2>
+      <div id="stages"></div>
+      <pre id="log"></pre>
+    </section>
+  </main>
+  <script src="app.js"></script>
+</body>
+</html>
