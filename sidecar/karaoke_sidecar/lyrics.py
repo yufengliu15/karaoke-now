@@ -6,6 +6,9 @@ Synced lyrics or nothing; a missing result is a normal outcome, not an error.
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import requests
 
 API_BASE = "https://lrclib.net/api"
@@ -42,6 +45,31 @@ def fetch_synced(
     if r.status_code != 200:
         return None
     return select_candidate(r.json(), duration_s)
+
+
+def retrofit(bundle_dir: Path, artist: str | None = None, title: str | None = None) -> bool:
+    """Fetch lyrics into an existing bundle, e.g. after fixing missing tags.
+
+    Skips the expensive pipeline stages entirely. Artist/title overrides are
+    persisted to meta.json on success so the library reflects the fixed tags.
+    """
+    bdir = Path(bundle_dir)
+    meta_path = bdir / "meta.json"
+    if not meta_path.exists():
+        raise ValueError(f"no meta.json in {bdir}")
+    doc = json.loads(meta_path.read_text())
+
+    artist = artist or doc.get("artist")
+    title = title or doc.get("title")
+    lrc = fetch_synced(artist, title, float(doc.get("duration_s") or 0), doc.get("album"))
+    if not lrc:
+        return False
+
+    (bdir / "lyrics.lrc").write_text(lrc)
+    doc["artist"], doc["title"] = artist, title
+    doc.setdefault("stages", {})["lyrics"] = "done"
+    meta_path.write_text(json.dumps(doc, indent=2))
+    return True
 
 
 def select_candidate(results: list[dict] | None, duration_s: float) -> str | None:

@@ -75,6 +75,13 @@ def process(args: argparse.Namespace) -> int:
     return 0
 
 
+def retrofit_lyrics(args: argparse.Namespace) -> int:
+    emit("lyrics", "start", bundle=str(args.bundle))
+    found = lyrics.retrofit(args.bundle, artist=args.artist, title=args.title)
+    emit("lyrics", "done", found=found)
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="karaoke-sidecar", description=__doc__)
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -88,8 +95,15 @@ def main(argv: list[str] | None = None) -> int:
     proc.add_argument("--force", action="store_true", help="reprocess even if cached")
     proc.add_argument("--skip-lyrics", action="store_true")
 
+    lyr = sub.add_parser("lyrics", help="re-fetch synced lyrics into an existing bundle")
+    lyr.add_argument("bundle", type=Path, help="bundle directory (songs/<id>)")
+    lyr.add_argument("--artist", help="override missing/wrong artist tag")
+    lyr.add_argument("--title", help="override missing/wrong title tag")
+
     args = p.parse_args(argv)
     try:
+        if args.cmd == "lyrics":
+            return retrofit_lyrics(args)
         return process(args)
     except Exception as e:
         traceback.print_exc()

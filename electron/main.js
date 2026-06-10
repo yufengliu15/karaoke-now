@@ -1,8 +1,8 @@
-const { app, BrowserWindow, dialog, ipcMain, net, protocol, shell } = require("electron");
+const { app, BrowserWindow, dialog, ipcMain, protocol, shell } = require("electron");
 const { spawn } = require("node:child_process");
 const fs = require("node:fs");
 const path = require("node:path");
-const { pathToFileURL } = require("node:url");
+const { Readable } = require("node:stream");
 
 const SIDECAR_DIR = path.join(__dirname, "..", "sidecar");
 const RENDERER_DIR = path.join(__dirname, "..", "renderer");
@@ -26,19 +26,56 @@ function songsRoot() {
   return root;
 }
 
-function serveFile(root, rel) {
+const MIME = {
+  ".html": "text/html",
+  ".css": "text/css",
+  ".js": "text/javascript",
+  ".mjs": "text/javascript",
+  ".json": "application/json",
+  ".wav": "audio/wav",
+  ".lrc": "text/plain",
+  ".png": "image/png",
+  ".svg": "image/svg+xml",
+};
+
+// Manual file serving with Range support: <audio> seeking sends Range
+// requests, and a stalled seek means a frozen player on any 30MB wav.
+function serveFile(root, rel, req) {
   const full = path.normalize(path.join(root, rel));
   if (!full.startsWith(root + path.sep) || !fs.existsSync(full) || !fs.statSync(full).isFile()) {
     return new Response("not found", { status: 404 });
   }
-  return net.fetch(pathToFileURL(full).toString());
+  const size = fs.statSync(full).size;
+  const type = MIME[path.extname(full).toLowerCase()] || "application/octet-stream";
+  const range = /bytes=(\d*)-(\d*)/.exec(req.headers.get("Range") || "");
+
+  if (range && (range[1] || range[2])) {
+    const start = range[1] ? Number(range[1]) : Math.max(0, size - Number(range[2]));
+    const end = Math.min(range[2] && range[1] ? Number(range[2]) : size - 1, size - 1);
+    if (start >= size || start > end) {
+      return new Response(null, { status: 416, headers: { "Content-Range": `bytes */${size}` } });
+    }
+    return new Response(Readable.toWeb(fs.createReadStream(full, { start, end })), {
+      status: 206,
+      headers: {
+        "Content-Type": type,
+        "Accept-Ranges": "bytes",
+        "Content-Range": `bytes ${start}-${end}/${size}`,
+        "Content-Length": String(end - start + 1),
+      },
+    });
+  }
+
+  return new Response(Readable.toWeb(fs.createReadStream(full)), {
+    headers: { "Content-Type": type, "Accept-Ranges": "bytes", "Content-Length": String(size) },
+  });
 }
 
 function handleAppRequest(req) {
   const url = new URL(req.url);
   const rel = decodeURIComponent(url.pathname).replace(/^\/+/, "");
-  if (rel.startsWith("songs/")) return serveFile(songsRoot(), rel.slice("songs/".length));
-  return serveFile(RENDERER_DIR, rel || "index.html");
+  if (rel.startsWith("songs/")) return serveFile(songsRoot(), rel.slice("songs/".length), req);
+  return serveFile(RENDERER_DIR, rel || "index.html", req);
 }
 
 let win;

@@ -50,6 +50,10 @@ meta.json          # tags, duration, stage statuses
 cd sidecar
 .venv/bin/python -m karaoke_sidecar.cli process "Artist - Title.mp3" --out /tmp/songs
 # flags: --fast  --engine {torchcrepe,pyin}  --force  --skip-lyrics  --model htdemucs
+
+# Lyrics lookup needs artist + title. If tags were missing (filename didn't
+# match "Artist - Title"), retro-fetch without reprocessing the audio:
+.venv/bin/python -m karaoke_sidecar.cli lyrics /path/to/songs/<id> --artist "The Jackson 5"
 ```
 
 ## Tests
