@@ -88,3 +88,52 @@ test("activeLineIndex: last line whose t <= now", () => {
 test("activeLineIndex: empty lines array", () => {
   assert.equal(activeLineIndex([], 5), -1);
 });
+
+// --- word-level timing ------------------------------------------------------
+
+import { wordTimings } from "../lrc.mjs";
+
+test("parses enhanced LRC inline word timestamps", () => {
+  const { lines } = parseLrc("[00:10.00] <00:10.00> Hello <00:10.80> there <00:11.40> world");
+  assert.equal(lines[0].text, "Hello there world");
+  assert.deepEqual(lines[0].words, [
+    { t: 10, text: "Hello" },
+    { t: 10.8, text: "there" },
+    { t: 11.4, text: "world" },
+  ]);
+});
+
+test("plain lines have no words array", () => {
+  const { lines } = parseLrc("[00:10.00] just a line");
+  assert.equal(lines[0].words, undefined);
+});
+
+test("offset shifts enhanced word stamps too", () => {
+  const { lines } = parseLrc("[offset:+500]\n[00:10.00] <00:10.00> a <00:11.00> b");
+  assert.equal(lines[0].t, 9.5);
+  assert.deepEqual(lines[0].words.map((w) => w.t), [9.5, 10.5]);
+});
+
+test("wordTimings: uses parsed word stamps when present", () => {
+  const { lines } = parseLrc("[00:10.00] <00:10.00> a <00:11.00> b");
+  assert.deepEqual(wordTimings(lines[0], 14), lines[0].words);
+});
+
+test("wordTimings: interpolates words across the line span by length", () => {
+  const { lines } = parseLrc("[00:10.00] a bbb");
+  const words = wordTimings(lines[0], 14);
+  assert.deepEqual(words.map((w) => w.text), ["a", "bbb"]);
+  assert.equal(words[0].t, 10);
+  assert.ok(Math.abs(words[1].t - (10 + (2 / 6) * 4)) < 1e-9);
+});
+
+test("wordTimings: equal words split the span evenly", () => {
+  const { lines } = parseLrc("[00:10.00] aa bb");
+  const words = wordTimings(lines[0], 12);
+  assert.deepEqual(words.map((w) => w.t), [10, 11]);
+});
+
+test("wordTimings: empty line text gives no words", () => {
+  const { lines } = parseLrc("[00:10.00] ");
+  assert.deepEqual(wordTimings(lines[0], 12), []);
+});

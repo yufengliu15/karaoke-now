@@ -220,6 +220,10 @@ section {
   font-weight: 650;
 }
 
+/* Word-by-word sweep inside the active line. */
+#lyrics .line.active .word { transition: color 100ms; }
+#lyrics .line.active .word.sung { color: var(--accent); }
+
 #transport {
   display: flex;
   align-items: center;
