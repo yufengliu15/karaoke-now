@@ -233,7 +233,8 @@ section {
 
 #playpause { min-width: 84px; }
 
-#mic {
+#mic,
+#octave {
   min-width: 84px;
   background: none;
   border: 1px solid var(--border);
@@ -242,7 +243,9 @@ section {
   padding: 8px 14px;
   cursor: pointer;
 }
-#mic:hover { border-color: var(--muted); }
+#mic:hover,
+#octave:hover { border-color: var(--muted); }
+#octave { color: var(--muted); min-width: 110px; }
 #mic.on {
   border-color: var(--ok);
   color: var(--ok);

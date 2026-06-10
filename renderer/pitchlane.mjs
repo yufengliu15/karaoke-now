@@ -131,28 +131,6 @@ export function foldMidiToRange(midi, lo, hi) {
   return Math.min(Math.max(midi, lo), hi);
 }
 
-// Live mic samples {t, midi} (time-ordered) → polyline segments, split on
-// gaps (breaths, unvoiced frames never produce samples). Single strays drop.
-export function userSegments(samples, { gapS = 0.25, minPoints = 2 } = {}) {
-  const segments = [];
-  let seg = [];
-  for (const s of samples) {
-    if (seg.length && s.t - seg[seg.length - 1].t > gapS) {
-      if (seg.length >= minPoints) segments.push(seg);
-      seg = [];
-    }
-    seg.push(s);
-  }
-  if (seg.length >= minPoints) segments.push(seg);
-  return segments;
-}
-
-// Trim the rolling sample buffer to what the lane can still show.
-export function pruneSamples(samples, before) {
-  const i = samples.findIndex((s) => s.t >= before);
-  return i < 0 ? [] : i === 0 ? samples : samples.slice(i);
-}
-
 // The now-line sits at leadFrac of the canvas width; time scrolls right-to-left.
 export function timeToX(t, now, { width, windowS, leadFrac = 0.25 }) {
   return ((t - now) / windowS + leadFrac) * width;

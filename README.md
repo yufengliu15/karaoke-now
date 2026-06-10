@@ -34,7 +34,9 @@ npm start
 
 Click a library row to open the **playback screen**: instrumental audio, a scrolling reference pitch lane (canvas, semitone gridlines, now-line at 25%), and synced lyrics with the active line highlighted. Space or the button toggles play/pause; the slider seeks.
 
-**Mic** turns on the live loop: your pitch is detected in real time (YIN compiled to WASM, running in an AudioWorklet, ~5ms updates) and drawn as a green trace over the reference bars, octave-folded into the lane so singing an octave off still lands on the melody. The transport shows the note you're holding. First use prompts for macOS mic permission. Voice processing (echo cancellation, AGC) is disabled on the capture path — sing over headphones for best results, since the instrumental bleeding into the mic will confuse the detector.
+**Mic** turns on the live loop: your pitch is detected in real time (YIN compiled to WASM, running in an AudioWorklet, ~5ms updates) and drawn as green held-note bars over the reference — the same semitone quantization the reference lane uses, with a short median window plus onset/switch hysteresis so vibrato and scoops don't wiggle the bar. The transport shows the note you're holding.
+
+The octave toggle picks the game you're playing: **Any octave** folds your pitch onto the melody, so only the note name has to match (sing it an octave down, still counts). **Exact octave** keeps your real register — sing an octave off and your bar drifts off the lane. First mic use prompts for macOS permission. Voice processing (echo cancellation, AGC) is disabled on the capture path — sing over headphones for best results, since the instrumental bleeding into the mic will confuse the detector.
 
 The detector source lives in `wasm/yin.ts` (AssemblyScript); the compiled `renderer/worklet/yin.wasm` is committed, so `npm run build:wasm` is only needed after editing it.
 

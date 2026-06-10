@@ -120,7 +120,7 @@ function armScreenshot() {
             if (!p) return "no probe";
             const f = [...p.f0s].sort((a, b) => a - b);
             return JSON.stringify({ messages: p.messages, voiced: p.voiced,
-              latencyMs: p.latencyMs, f0Median: f[f.length >> 1] ?? 0 });
+              latencyMs: p.latencyMs, f0Median: f[f.length >> 1] ?? 0, bars: p.bars ?? 0 });
           })()`);
           console.log("[karaoke-now] mic probe:", probe);
         }

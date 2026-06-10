@@ -10,9 +10,8 @@ import {
   midiToY,
   hzToMidi,
   foldMidiToRange,
-  userSegments,
-  pruneSamples,
 } from "./pitchlane.mjs";
+import { LiveNoteTracker } from "./livenotes.mjs";
 import { startMic } from "./mic.mjs";
 
 const WINDOW_S = 8; // seconds of contour visible across the lane
@@ -22,7 +21,11 @@ const LEAD_FRAC = 0.25; // now-line position as a fraction of lane width
 // above 0.6; the RMS floor keeps silence and breath off the lane.
 const CLARITY_MIN = 0.6;
 const RMS_FLOOR = 0.005;
-const TRACE_GAP_S = 0.25; // breath gap that splits the drawn trace
+
+// "any": octave-fold the sung pitch into the lane — only the note name has
+// to match. "exact": the register matters; an octave off drifts off-lane.
+const OCTAVE_MODES = { any: "Any octave", exact: "Exact octave" };
+let octaveMode = localStorage.getItem("karaoke-octave-mode") || "any";
 
 const els = {};
 let css = {};
@@ -30,9 +33,10 @@ let state = null;
 let rafId = 0;
 let currentSession = null;
 let mic = null; // live mic engine, one at a time, stopped on player close
+let lastVoicedMs = 0; // wall-clock time of the last voiced estimate
 
 export function initPlayer() {
-  for (const id of ["view-player", "back", "p-title", "p-artist", "p-clock", "lane", "lyrics", "lyrics-empty", "playpause", "mic", "mic-note", "seek"]) {
+  for (const id of ["view-player", "back", "p-title", "p-artist", "p-clock", "lane", "lyrics", "lyrics-empty", "playpause", "mic", "mic-note", "octave", "seek"]) {
     els[id.replace(/-(\w)/g, (_, c) => c.toUpperCase())] = document.getElementById(id);
   }
   const style = getComputedStyle(document.body);
@@ -46,6 +50,12 @@ export function initPlayer() {
 
   els.playpause.addEventListener("click", togglePlay);
   els.mic.addEventListener("click", toggleMic);
+  els.octave.textContent = OCTAVE_MODES[octaveMode];
+  els.octave.addEventListener("click", () => {
+    octaveMode = octaveMode === "any" ? "exact" : "any";
+    localStorage.setItem("karaoke-octave-mode", octaveMode);
+    els.octave.textContent = OCTAVE_MODES[octaveMode];
+  });
   document.addEventListener("keydown", (e) => {
     if (state && e.code === "Space" && e.target.tagName !== "INPUT") {
       e.preventDefault();
@@ -55,7 +65,7 @@ export function initPlayer() {
   els.seek.addEventListener("input", () => {
     if (!state) return;
     state.audio.currentTime = Number(els.seek.value);
-    state.micSamples = []; // trace times are song-relative; a seek orphans them
+    state.liveNotes.reset(); // bar times are song-relative; a seek orphans them
   });
   els.seek.addEventListener("pointerdown", () => state && (state.scrubbing = true));
   els.seek.addEventListener("pointerup", () => state && (state.scrubbing = false));
@@ -88,7 +98,7 @@ export async function openPlayer(id, { t = 0, autoplay = false } = {}) {
     words: [],
     wordIdx: -1,
     scrubbing: false,
-    micSamples: [], // live {t, midi} ring, pruned to the visible past
+    liveNotes: new LiveNoteTracker(), // live mic estimates → stable note bars
     // Streamed wav reports duration=Infinity until fully buffered; meta.json is the truth.
     durationS: meta?.duration_s || 0,
   };
@@ -174,23 +184,28 @@ function onMicSample(d) {
   probe.messages++;
 
   const voiced = d.f0 > 0 && d.clarity >= CLARITY_MIN && d.rms >= RMS_FLOOR;
-  if (!voiced) {
-    if (els.micNote.textContent) els.micNote.textContent = "";
-    return;
-  }
+  if (!voiced) return; // readout clears on sustained silence in tick()
+  lastVoicedMs = performance.now();
   probe.voiced++;
   probe.f0s.push(Math.round(d.f0 * 10) / 10);
   if (probe.f0s.length > 200) probe.f0s.shift();
 
-  if (!state || !mic) return;
-  const midi = hzToMidi(d.f0);
-  els.micNote.textContent = noteName(midi);
-  if (state.audio.paused) return;
+  if (!state || !mic || state.audio.paused) return;
+
+  // In "any octave" mode the sung pitch is folded into the lane before the
+  // tracker sees it, so the held bar lands on the reference melody. In
+  // "exact" mode the raw register goes through untouched.
+  let midi = hzToMidi(d.f0);
+  if (octaveMode === "any") midi = foldMidiToRange(midi, state.range.lo, state.range.hi);
 
   // d.t is the ctx time of the analysis-window center; subtracting its age
   // from the song clock pins the sample to the moment it was actually sung.
   const songT = state.audio.currentTime - Math.max(0, mic.ctx.currentTime - d.t);
-  state.micSamples.push({ t: songT, midi });
+  state.liveNotes.push(songT, midi);
+
+  const held = state.liveNotes.note();
+  els.micNote.textContent = held === null ? "" : noteName(held);
+  probe.bars = state.liveNotes.bars().length;
 }
 
 function noteName(midi) {
@@ -235,10 +250,11 @@ function tick() {
   rafId = requestAnimationFrame(tick);
   const now = state.audio.currentTime;
 
-  if (state.micSamples.length) {
-    state.micSamples = pruneSamples(state.micSamples, now - LEAD_FRAC * WINDOW_S - 0.5);
-  }
   drawLane(now);
+
+  if (mic && els.micNote.textContent && performance.now() - lastVoicedMs > 300) {
+    els.micNote.textContent = "";
+  }
 
   const clock = `${fmtClock(now)} / ${fmtClock(state.durationS)}`;
   if (els.pClock.textContent !== clock) els.pClock.textContent = clock;
@@ -364,27 +380,26 @@ function drawLane(now) {
     ctx.restore();
   }
 
-  // Live user trace: green polyline over the sung region, clipped at the
-  // now-line. Octave-folded into the lane so off-octave singing still lands
-  // on the reference instead of off-canvas.
-  if (state.micSamples.length) {
+  // Live user bars: the singer's held notes, quantized and stabilized the
+  // same way as the reference (LiveNoteTracker), drawn thinner and green so
+  // both layers stay readable. Clipped at the now-line.
+  const liveBars = state.liveNotes.bars();
+  if (liveBars.length) {
+    const uBarH = Math.min(Math.max(rowH * 0.45, 3), 12);
     ctx.save();
     ctx.beginPath();
     ctx.rect(0, 0, nowX, height);
     ctx.clip();
-    ctx.strokeStyle = css.ok;
-    ctx.lineWidth = 2.5;
-    ctx.lineJoin = "round";
-    ctx.lineCap = "round";
+    ctx.fillStyle = css.ok;
     ctx.globalAlpha = 0.95;
-    for (const seg of userSegments(state.micSamples, { gapS: TRACE_GAP_S })) {
+    for (const b of liveBars) {
+      if (b.t1 < tMin || b.t0 > tMax) continue;
+      const bx0 = timeToX(b.t0, now, geo);
+      const bx1 = timeToX(b.t1, now, geo);
+      const y = midiToY(b.midi, yOpts);
       ctx.beginPath();
-      for (let i = 0; i < seg.length; i++) {
-        const x = timeToX(seg[i].t, now, geo);
-        const y = midiToY(foldMidiToRange(seg[i].midi, lo, hi), yOpts);
-        i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
-      }
-      ctx.stroke();
+      ctx.roundRect(bx0, y - uBarH / 2, Math.max(bx1 - bx0, 3), uBarH, uBarH / 2);
+      ctx.fill();
     }
     ctx.restore();
     ctx.globalAlpha = 1;
