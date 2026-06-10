@@ -120,6 +120,17 @@ export function fitMidiRange(contour, opts = {}) {
   return { lo, hi };
 }
 
+// Fold a pitch into the lane's display range by whole octaves: singing an
+// octave off on an out-of-range song is legitimate karaoke, and the live
+// trace should land on the reference, not off-canvas. Clamps when the lane
+// spans less than an octave. Display-only — scoring sees the raw pitch.
+export function foldMidiToRange(midi, lo, hi) {
+  if (!Number.isFinite(midi)) return midi;
+  while (midi < lo) midi += 12;
+  while (midi > hi) midi -= 12;
+  return Math.min(Math.max(midi, lo), hi);
+}
+
 // The now-line sits at leadFrac of the canvas width; time scrolls right-to-left.
 export function timeToX(t, now, { width, windowS, leadFrac = 0.25 }) {
   return ((t - now) / windowS + leadFrac) * width;

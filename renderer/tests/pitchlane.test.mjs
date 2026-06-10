@@ -147,3 +147,31 @@ test("buildNotes: low-confidence frames are unvoiced", () => {
   assert.equal(notes.length, 1);
   assert.ok(notes[0].t1 <= 0.2 + 1e-9);
 });
+
+// --- live user trace (Phase 3) ---------------------------------------------
+
+import { foldMidiToRange } from "../pitchlane.mjs";
+
+test("foldMidiToRange: in-range pitch passes through untouched", () => {
+  assert.equal(foldMidiToRange(64.3, 55, 79), 64.3);
+});
+
+test("foldMidiToRange: octave-down singing folds up into the lane", () => {
+  // Reference lane around C4..C5, singer an octave below.
+  assert.equal(foldMidiToRange(48.5, 60, 84), 60.5);
+  assert.equal(foldMidiToRange(36.5, 60, 84), 60.5);
+});
+
+test("foldMidiToRange: octave-up folds down", () => {
+  assert.equal(foldMidiToRange(91, 60, 84), 79);
+});
+
+test("foldMidiToRange: narrow lane (span < octave) clamps after best fold", () => {
+  const v = foldMidiToRange(50, 60, 66);
+  assert.ok(v >= 60 && v <= 66, `got ${v}`);
+});
+
+
+
+
+

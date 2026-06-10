@@ -1,12 +1,12 @@
 # karaoke-now
 
-Local-first karaoke desktop app for solo singing practice. Pick an mp3; the app strips the vocals, fetches time-synced lyrics, extracts the original vocal's pitch contour, then (Phase 3) draws your live mic pitch against it while you sing. No accounts, no cloud, no leaderboards.
+Local-first karaoke desktop app for solo singing practice. Pick an mp3; the app strips the vocals, fetches time-synced lyrics, extracts the original vocal's pitch contour, then draws your live mic pitch against it while you sing. No accounts, no cloud, no leaderboards.
 
 Project page (decisions, plan, open questions) lives in the Obsidian wiki: `Imagineer/_wiki/projects/local-karaoke/`.
 
 ## Stack
 
-- **Electron** shell + renderer (UI, later: Web Audio capture + YIN-in-WASM live pitch detection in an AudioWorklet)
+- **Electron** shell + renderer (UI, Web Audio mic capture, YIN-in-WASM live pitch detection in an AudioWorklet, canvas pitch lanes)
 - **Python sidecar** for the offline pipeline: [Demucs](https://github.com/facebookresearch/demucs) two-stem separation, [torchcrepe](https://github.com/maxrmorrison/torchcrepe) reference pitch contour, [LRClib](https://lrclib.net) synced lyrics
 - Sidecar speaks a JSON-lines protocol on stdout; Electron streams it into the UI
 
@@ -32,7 +32,13 @@ npm start
 
 "Add song" → pick an audio file → watch the pipeline chips (tags → Demucs → pitch → lyrics → bundle). First run downloads Demucs/CREPE model weights. The `fast` toggle uses CREPE-tiny for a quicker, rougher contour.
 
-Click a library row to open the **playback screen**: instrumental audio, a scrolling reference pitch lane (canvas, octave gridlines, now-line at 25%), and synced lyrics with the active line highlighted. Space or the button toggles play/pause; the slider seeks. No mic yet — that's Phase 3.
+Click a library row to open the **playback screen**: instrumental audio, a scrolling reference pitch lane (canvas, semitone gridlines, now-line at 25%), and synced lyrics with the active line highlighted. Space or the button toggles play/pause; the slider seeks.
+
+**Mic** turns on the live loop: your pitch is detected in real time (YIN compiled to WASM, running in an AudioWorklet, ~5ms updates) and drawn as green held-note bars over the reference — the same semitone quantization the reference lane uses, with a short median window plus onset/switch hysteresis so vibrato and scoops don't wiggle the bar. The transport shows the note you're holding.
+
+The octave toggle picks the game you're playing: **Any octave** folds your pitch onto the melody, so only the note name has to match (sing it an octave down, still counts). **Exact octave** keeps your real register — sing an octave off and your bar drifts off the lane. First mic use prompts for macOS permission. Voice processing (echo cancellation, AGC) is disabled on the capture path — sing over headphones for best results, since the instrumental bleeding into the mic will confuse the detector.
+
+The detector source lives in `wasm/yin.ts` (AssemblyScript); the compiled `renderer/worklet/yin.wasm` is committed, so `npm run build:wasm` is only needed after editing it.
 
 Bundles land in Electron's `userData/songs/<id>/`:
 
@@ -76,12 +82,16 @@ KARAOKE_SONGS_DIR=/tmp/karaoke-test-songs \
 KARAOKE_SHOT_DIR=/tmp/karaoke-shots \
 KARAOKE_SHOT_HASH="#play/deadbeefdeadbeef?t=12" \
 KARAOKE_SHOT_PLAY=1 npx electron .       # screenshot + playback probe, then quits
+
+# KARAOKE_FAKE_MIC=440 swaps the mic for a 440 Hz oscillator: the probe then
+# clicks Mic, logs estimate counts + median f0, and the screenshot shows the
+# live trace — the whole Phase 3 loop verified without a microphone.
 ```
 
 ## Status / roadmap
 
 - [x] **Phase 1 — song pipeline**: file picker → cached bundle (this repo, 2026-06-10)
 - [x] **Phase 2 — playback screen**: instrumental + scrolling lyrics + reference pitch lane (2026-06-10)
-- [ ] **Phase 3 — live mic loop**: AudioWorklet + YIN-WASM, user pitch line over reference, <50ms mic-to-pixel
+- [x] **Phase 3 — live mic loop**: AudioWorklet + YIN-WASM, user pitch line over reference, <50ms mic-to-pixel (2026-06-10)
 - [ ] **Phase 4 — scoring**: in-tune-percent per phrase + session summary
 - Post-MVP: yt-dlp ingest, WhisperX forced-alignment fallback, key transposition

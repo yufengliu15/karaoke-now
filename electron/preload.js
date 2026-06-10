@@ -7,4 +7,5 @@ contextBridge.exposeInMainWorld("karaoke", {
   revealBundle: (bundlePath) => ipcRenderer.invoke("reveal-bundle", bundlePath),
   onProgress: (cb) => ipcRenderer.on("sidecar-progress", (_e, msg) => cb(msg)),
   onLog: (cb) => ipcRenderer.on("sidecar-log", (_e, line) => cb(line)),
+  fakeMicHz: ipcRenderer.sendSync("fake-mic-hz"),
 });

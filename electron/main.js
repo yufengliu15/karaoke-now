@@ -1,4 +1,4 @@
-const { app, BrowserWindow, dialog, ipcMain, protocol, shell } = require("electron");
+const { app, BrowserWindow, dialog, ipcMain, protocol, session, shell, systemPreferences } = require("electron");
 const { spawn } = require("node:child_process");
 const fs = require("node:fs");
 const path = require("node:path");
@@ -107,9 +107,23 @@ function armScreenshot() {
         // advances off audio.currentTime, so movement proves audio is playing).
         const clk = () => win.webContents.executeJavaScript('document.getElementById("p-clock").textContent');
         await win.webContents.executeJavaScript('document.getElementById("playpause").click()');
+        if (process.env.KARAOKE_FAKE_MIC) {
+          await win.webContents.executeJavaScript('document.getElementById("mic").click()');
+        }
         const before = await clk();
         await new Promise((r) => setTimeout(r, 3000));
         console.log(`[karaoke-now] playback probe: "${before}" -> "${await clk()}"`);
+        if (process.env.KARAOKE_FAKE_MIC) {
+          // Loop proof: fake oscillator in, YIN estimates out, trace on canvas.
+          const probe = await win.webContents.executeJavaScript(`(() => {
+            const p = window.__micProbe;
+            if (!p) return "no probe";
+            const f = [...p.f0s].sort((a, b) => a - b);
+            return JSON.stringify({ messages: p.messages, voiced: p.voiced,
+              latencyMs: p.latencyMs, f0Median: f[f.length >> 1] ?? 0, bars: p.bars ?? 0 });
+          })()`);
+          console.log("[karaoke-now] mic probe:", probe);
+        }
       }
       const img = await win.webContents.capturePage();
       const name = process.env.KARAOKE_SHOT_HASH ? "player.png" : "library.png";
@@ -122,6 +136,17 @@ function armScreenshot() {
 
 app.whenReady().then(() => {
   protocol.handle("app", handleAppRequest);
+  // Mic capture is the only permission the renderer ever needs (Phase 3
+  // getUserMedia); deny everything else. On macOS the OS-level TCC prompt
+  // must be requested explicitly or getUserMedia fails silently.
+  session.defaultSession.setPermissionRequestHandler((_wc, permission, callback) => {
+    if (permission !== "media") return callback(false);
+    if (process.platform === "darwin") {
+      systemPreferences.askForMediaAccess("microphone").then(callback);
+    } else {
+      callback(true);
+    }
+  });
   createWindow();
   armScreenshot();
   console.log("[karaoke-now] ready; songs root:", songsRoot());
@@ -132,6 +157,12 @@ app.whenReady().then(() => {
 
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin" || process.env.KARAOKE_SHOT_DIR) app.quit();
+});
+
+// Harness knob: KARAOKE_FAKE_MIC=<hz> swaps getUserMedia for an oscillator so
+// the live loop is verifiable headless. Sync because preload reads it once.
+ipcMain.on("fake-mic-hz", (e) => {
+  e.returnValue = process.env.KARAOKE_FAKE_MIC || "";
 });
 
 ipcMain.handle("pick-audio", async () => {

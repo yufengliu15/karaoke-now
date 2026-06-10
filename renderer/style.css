@@ -233,6 +233,33 @@ section {
 
 #playpause { min-width: 84px; }
 
+#mic,
+#octave {
+  min-width: 84px;
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 8px;
+  padding: 8px 14px;
+  cursor: pointer;
+}
+#mic:hover,
+#octave:hover { border-color: var(--muted); }
+#octave { color: var(--muted); min-width: 110px; }
+#mic.on {
+  border-color: var(--ok);
+  color: var(--ok);
+}
+#mic:disabled { opacity: 0.45; cursor: default; }
+
+/* Live detected note; sized so the seek bar doesn't jitter as it changes. */
+.mic-note {
+  min-width: 44px;
+  text-align: center;
+  font: 13px ui-monospace, "SF Mono", Menlo, monospace;
+  color: var(--ok);
+}
+
 #seek {
   flex: 1;
   accent-color: var(--accent);

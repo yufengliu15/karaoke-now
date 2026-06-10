@@ -3,19 +3,40 @@
 // owns the DOM, the <audio> clock, and the rAF render loop.
 
 import { parseLrc, activeLineIndex, wordTimings } from "./lrc.mjs";
-import { buildNotes, fitMidiRange, timeToX, midiToY } from "./pitchlane.mjs";
+import {
+  buildNotes,
+  fitMidiRange,
+  timeToX,
+  midiToY,
+  hzToMidi,
+  foldMidiToRange,
+} from "./pitchlane.mjs";
+import { LiveNoteTracker } from "./livenotes.mjs";
+import { startMic } from "./mic.mjs";
 
 const WINDOW_S = 8; // seconds of contour visible across the lane
 const LEAD_FRAC = 0.25; // now-line position as a fraction of lane width
+
+// Voicing gates on live mic estimates: YIN clarity on real singing sits well
+// above 0.6; the RMS floor keeps silence and breath off the lane.
+const CLARITY_MIN = 0.6;
+const RMS_FLOOR = 0.005;
+
+// "any": octave-fold the sung pitch into the lane — only the note name has
+// to match. "exact": the register matters; an octave off drifts off-lane.
+const OCTAVE_MODES = { any: "Any octave", exact: "Exact octave" };
+let octaveMode = localStorage.getItem("karaoke-octave-mode") || "any";
 
 const els = {};
 let css = {};
 let state = null;
 let rafId = 0;
 let currentSession = null;
+let mic = null; // live mic engine, one at a time, stopped on player close
+let lastVoicedMs = 0; // wall-clock time of the last voiced estimate
 
 export function initPlayer() {
-  for (const id of ["view-player", "back", "p-title", "p-artist", "p-clock", "lane", "lyrics", "lyrics-empty", "playpause", "seek"]) {
+  for (const id of ["view-player", "back", "p-title", "p-artist", "p-clock", "lane", "lyrics", "lyrics-empty", "playpause", "mic", "mic-note", "octave", "seek"]) {
     els[id.replace(/-(\w)/g, (_, c) => c.toUpperCase())] = document.getElementById(id);
   }
   const style = getComputedStyle(document.body);
@@ -28,6 +49,13 @@ export function initPlayer() {
   };
 
   els.playpause.addEventListener("click", togglePlay);
+  els.mic.addEventListener("click", toggleMic);
+  els.octave.textContent = OCTAVE_MODES[octaveMode];
+  els.octave.addEventListener("click", () => {
+    octaveMode = octaveMode === "any" ? "exact" : "any";
+    localStorage.setItem("karaoke-octave-mode", octaveMode);
+    els.octave.textContent = OCTAVE_MODES[octaveMode];
+  });
   document.addEventListener("keydown", (e) => {
     if (state && e.code === "Space" && e.target.tagName !== "INPUT") {
       e.preventDefault();
@@ -35,7 +63,9 @@ export function initPlayer() {
     }
   });
   els.seek.addEventListener("input", () => {
-    if (state) state.audio.currentTime = Number(els.seek.value);
+    if (!state) return;
+    state.audio.currentTime = Number(els.seek.value);
+    state.liveNotes.reset(); // bar times are song-relative; a seek orphans them
   });
   els.seek.addEventListener("pointerdown", () => state && (state.scrubbing = true));
   els.seek.addEventListener("pointerup", () => state && (state.scrubbing = false));
@@ -68,6 +98,7 @@ export async function openPlayer(id, { t = 0, autoplay = false } = {}) {
     words: [],
     wordIdx: -1,
     scrubbing: false,
+    liveNotes: new LiveNoteTracker(), // live mic estimates → stable note bars
     // Streamed wav reports duration=Infinity until fully buffered; meta.json is the truth.
     durationS: meta?.duration_s || 0,
   };
@@ -102,6 +133,7 @@ export async function openPlayer(id, { t = 0, autoplay = false } = {}) {
 export function closePlayer() {
   currentSession = null;
   cancelAnimationFrame(rafId);
+  stopMic();
   if (state) {
     state.audio.pause();
     state.audio.removeAttribute("src");
@@ -116,6 +148,69 @@ export function closePlayer() {
 function togglePlay() {
   if (!state) return;
   state.audio.paused ? state.audio.play().catch(() => {}) : state.audio.pause();
+}
+
+async function toggleMic() {
+  if (mic) {
+    stopMic();
+    return;
+  }
+  els.mic.disabled = true;
+  try {
+    const fakeHz = Number(window.karaoke.fakeMicHz || 0);
+    mic = await startMic({ onSample: onMicSample, fakeHz });
+    (window.__micProbe ??= { messages: 0, voiced: 0, f0s: [] }).latencyMs = mic.latencyMs;
+    els.mic.textContent = "Mic on";
+    els.mic.classList.add("on");
+  } catch (err) {
+    console.error("mic start failed:", err);
+    els.micNote.textContent = "mic blocked";
+  }
+  els.mic.disabled = false;
+}
+
+function stopMic() {
+  if (mic) mic.stop();
+  mic = null;
+  els.mic.textContent = "Mic off";
+  els.mic.classList.remove("on");
+  els.micNote.textContent = "";
+}
+
+function onMicSample(d) {
+  // Probe: lets the headless harness assert the loop end to end (fake mic in,
+  // ~fakeHz out). Negligible cost when nobody reads it.
+  const probe = (window.__micProbe ??= { messages: 0, voiced: 0, f0s: [] });
+  probe.messages++;
+
+  const voiced = d.f0 > 0 && d.clarity >= CLARITY_MIN && d.rms >= RMS_FLOOR;
+  if (!voiced) return; // readout clears on sustained silence in tick()
+  lastVoicedMs = performance.now();
+  probe.voiced++;
+  probe.f0s.push(Math.round(d.f0 * 10) / 10);
+  if (probe.f0s.length > 200) probe.f0s.shift();
+
+  if (!state || !mic || state.audio.paused) return;
+
+  // In "any octave" mode the sung pitch is folded into the lane before the
+  // tracker sees it, so the held bar lands on the reference melody. In
+  // "exact" mode the raw register goes through untouched.
+  let midi = hzToMidi(d.f0);
+  if (octaveMode === "any") midi = foldMidiToRange(midi, state.range.lo, state.range.hi);
+
+  // d.t is the ctx time of the analysis-window center; subtracting its age
+  // from the song clock pins the sample to the moment it was actually sung.
+  const songT = state.audio.currentTime - Math.max(0, mic.ctx.currentTime - d.t);
+  state.liveNotes.push(songT, midi);
+
+  const held = state.liveNotes.note();
+  els.micNote.textContent = held === null ? "" : noteName(held);
+  probe.bars = state.liveNotes.bars().length;
+}
+
+function noteName(midi) {
+  const m = Math.round(midi);
+  return `${NOTE_NAMES[((m % 12) + 12) % 12]}${Math.floor(m / 12) - 1}`;
 }
 
 async function fetchJson(url) {
@@ -156,6 +251,10 @@ function tick() {
   const now = state.audio.currentTime;
 
   drawLane(now);
+
+  if (mic && els.micNote.textContent && performance.now() - lastVoicedMs > 300) {
+    els.micNote.textContent = "";
+  }
 
   const clock = `${fmtClock(now)} / ${fmtClock(state.durationS)}`;
   if (els.pClock.textContent !== clock) els.pClock.textContent = clock;
@@ -279,6 +378,31 @@ function drawLane(now) {
       ctx.fill();
     }
     ctx.restore();
+  }
+
+  // Live user bars: the singer's held notes, quantized and stabilized the
+  // same way as the reference (LiveNoteTracker), drawn thinner and green so
+  // both layers stay readable. Clipped at the now-line.
+  const liveBars = state.liveNotes.bars();
+  if (liveBars.length) {
+    const uBarH = Math.min(Math.max(rowH * 0.45, 3), 12);
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(0, 0, nowX, height);
+    ctx.clip();
+    ctx.fillStyle = css.ok;
+    ctx.globalAlpha = 0.95;
+    for (const b of liveBars) {
+      if (b.t1 < tMin || b.t0 > tMax) continue;
+      const bx0 = timeToX(b.t0, now, geo);
+      const bx1 = timeToX(b.t1, now, geo);
+      const y = midiToY(b.midi, yOpts);
+      ctx.beginPath();
+      ctx.roundRect(bx0, y - uBarH / 2, Math.max(bx1 - bx0, 3), uBarH, uBarH / 2);
+      ctx.fill();
+    }
+    ctx.restore();
+    ctx.globalAlpha = 1;
   }
 
   // Note labels on top of the bars.
