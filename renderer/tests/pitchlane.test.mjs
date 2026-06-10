@@ -92,3 +92,58 @@ test("midiToY: higher pitch is higher on canvas (smaller y)", () => {
   assert.equal(midiToY(60, opts), 240);
   assert.equal(midiToY(66, opts), 120);
 });
+
+// --- note quantization (buildNotes) ---------------------------------------
+
+import { buildNotes } from "../pitchlane.mjs";
+
+test("buildNotes: steady run becomes one bar at the quantized semitone", () => {
+  const notes = buildNotes(contour(Array(50).fill(220)));
+  assert.equal(notes.length, 1);
+  assert.equal(notes[0].midi, 57);
+  assert.equal(notes[0].t0, 0);
+  assert.ok(Math.abs(notes[0].t1 - 0.49) < 1e-9);
+});
+
+test("buildNotes: vibrato within the semitone collapses into one flat bar", () => {
+  // ±40 cents around A3 (220 Hz): frames alternate but all quantize to 57.
+  const f0 = Array.from({ length: 60 }, (_, i) => 220 * 2 ** (0.4 * Math.sin(i / 3) / 12));
+  const notes = buildNotes(contour(f0));
+  assert.equal(notes.length, 1);
+  assert.equal(notes[0].midi, 57);
+});
+
+test("buildNotes: melody with unvoiced gap becomes separate bars", () => {
+  const f0 = [...Array(30).fill(220), ...Array(20).fill(0), ...Array(30).fill(261.63)];
+  const notes = buildNotes(contour(f0));
+  assert.deepEqual(notes.map((n) => n.midi), [57, 60]);
+  assert.ok(notes[1].t0 > notes[0].t1);
+});
+
+test("buildNotes: semitone slide inside a run splits into two bars", () => {
+  const f0 = [...Array(30).fill(220), ...Array(30).fill(246.94)]; // A3 → B3
+  const notes = buildNotes(contour(f0), { smooth: 1 });
+  assert.deepEqual(notes.map((n) => n.midi), [57, 59]);
+});
+
+test("buildNotes: blips shorter than minNoteS are dropped", () => {
+  const f0 = [...Array(30).fill(220), ...Array(3).fill(440), ...Array(30).fill(220)];
+  const notes = buildNotes(contour(f0), { smooth: 1, minNoteS: 0.08, mergeGapS: 0 });
+  for (const n of notes) assert.equal(n.midi, 57);
+});
+
+test("buildNotes: same note across a tiny gap merges into one bar", () => {
+  const f0 = [...Array(30).fill(220), ...Array(4).fill(0), ...Array(30).fill(220)];
+  const notes = buildNotes(contour(f0), { mergeGapS: 0.06 });
+  assert.equal(notes.length, 1);
+  assert.equal(notes[0].midi, 57);
+  assert.ok(notes[0].t1 > 0.6);
+});
+
+test("buildNotes: low-confidence frames are unvoiced", () => {
+  const f0 = Array(40).fill(220);
+  const conf = f0.map((_, i) => (i < 20 ? 0.9 : 0.1));
+  const notes = buildNotes(contour(f0, conf), { mergeGapS: 0 });
+  assert.equal(notes.length, 1);
+  assert.ok(notes[0].t1 <= 0.2 + 1e-9);
+});

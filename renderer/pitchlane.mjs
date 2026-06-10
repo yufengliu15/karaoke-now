@@ -17,15 +17,7 @@ export function medianSmooth(values, win) {
   });
 }
 
-const SEG_DEFAULTS = { confMin: 0.5, smooth: 5, jumpMidi: 6, minFrames: 2 };
-
-// Voiced runs → polyline segments of {t, midi}. Splits on unvoiced frames,
-// low confidence, and adjacent-frame jumps larger than jumpMidi (octave errors).
-export function buildSegments(contour, opts = {}) {
-  const { confMin, smooth, jumpMidi, minFrames } = { ...SEG_DEFAULTS, ...opts };
-  const { f0_hz: f0, confidence: conf, hop_ms } = contour;
-  const dt = hop_ms / 1000;
-
+function voicedRuns(f0, conf, confMin) {
   const runs = [];
   let run = null;
   for (let i = 0; i < f0.length; i++) {
@@ -37,6 +29,18 @@ export function buildSegments(contour, opts = {}) {
     }
   }
   if (run) runs.push(run);
+  return runs;
+}
+
+const SEG_DEFAULTS = { confMin: 0.5, smooth: 5, jumpMidi: 6, minFrames: 2 };
+
+// Voiced runs → polyline segments of {t, midi}. Splits on unvoiced frames,
+// low confidence, and adjacent-frame jumps larger than jumpMidi (octave errors).
+export function buildSegments(contour, opts = {}) {
+  const { confMin, smooth, jumpMidi, minFrames } = { ...SEG_DEFAULTS, ...opts };
+  const { f0_hz: f0, confidence: conf, hop_ms } = contour;
+  const dt = hop_ms / 1000;
+  const runs = voicedRuns(f0, conf, confMin);
 
   const segments = [];
   for (const indices of runs) {
@@ -52,6 +56,45 @@ export function buildSegments(contour, opts = {}) {
     if (seg.length >= minFrames) segments.push(seg);
   }
   return segments;
+}
+
+const NOTE_DEFAULTS = { confMin: 0.5, smooth: 5, minNoteS: 0.08, mergeGapS: 0.08 };
+
+// Voiced runs → discrete note bars {t0, t1, midi}. The karaoke view: each
+// sung syllable reads as one held note, with vibrato and scoops absorbed by
+// semitone quantization. Display-only — scoring keeps the raw contour.
+export function buildNotes(contour, opts = {}) {
+  const { confMin, smooth, minNoteS, mergeGapS } = { ...NOTE_DEFAULTS, ...opts };
+  const { f0_hz: f0, confidence: conf, hop_ms } = contour;
+  const dt = hop_ms / 1000;
+
+  let notes = [];
+  for (const indices of voicedRuns(f0, conf, confMin)) {
+    const midis = medianSmooth(indices.map((i) => f0[i]), smooth).map((hz) =>
+      Math.round(hzToMidi(hz)),
+    );
+    let s = 0;
+    for (let k = 1; k <= indices.length; k++) {
+      if (k === indices.length || midis[k] !== midis[s]) {
+        notes.push({ t0: indices[s] * dt, t1: indices[k - 1] * dt, midi: midis[s] });
+        s = k;
+      }
+    }
+  }
+
+  notes = notes.filter((n) => n.t1 - n.t0 >= minNoteS);
+
+  // Re-join the same note across breath blips and dropped glitches.
+  const merged = [];
+  for (const n of notes) {
+    const prev = merged[merged.length - 1];
+    if (prev && prev.midi === n.midi && n.t0 - prev.t1 <= mergeGapS) {
+      prev.t1 = n.t1;
+    } else {
+      merged.push({ ...n });
+    }
+  }
+  return merged;
 }
 
 const RANGE_DEFAULTS = { confMin: 0.5, padSt: 3, minSpan: 18, fallback: { lo: 48, hi: 72 } };
