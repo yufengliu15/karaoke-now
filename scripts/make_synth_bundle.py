@@ -6,6 +6,7 @@ must merely be a valid wav).
 """
 
 import json
+import os
 import time
 import wave
 from pathlib import Path
@@ -13,7 +14,7 @@ from pathlib import Path
 import numpy as np
 
 SR = 16000
-DUR = 30.0
+DUR = float(os.environ.get("KARAOKE_SYNTH_DUR_S", "30"))
 HOP_MS = 10
 ROOT = Path("/tmp/karaoke-test-songs/deadbeefdeadbeef")
 ROOT.mkdir(parents=True, exist_ok=True)
@@ -50,6 +51,12 @@ for k in range(int(DUR / step)):
     vib = 0.25 * np.sin(2 * np.pi * 5.5 * (frames / 100.0))  # ±25 cents, 5.5 Hz
     f0[frames] = 440.0 * 2 ** ((midi - 69 + vib) / 12)
     conf[frames] = 0.95
+# Constant-pitch mode: the whole song is one note, so a fixed-frequency fake
+# mic (KARAOKE_FAKE_MIC) should score ~100% — the scoring-pipeline e2e check.
+const_hz = float(os.environ.get("KARAOKE_SYNTH_CONST_HZ", "0"))
+if const_hz:
+    f0[:] = const_hz
+    conf[:] = 0.95
 (ROOT / "contour.json").write_text(json.dumps({
     "version": 1, "engine": "synthetic", "sample_rate": SR, "hop_ms": HOP_MS,
     "fmin": 50.0, "fmax": 1100.0, "duration_s": DUR,

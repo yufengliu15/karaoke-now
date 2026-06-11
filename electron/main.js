@@ -124,6 +124,20 @@ function armScreenshot() {
           })()`);
           console.log("[karaoke-now] mic probe:", probe);
         }
+        if (process.env.KARAOKE_SHOT_SUMMARY_WAIT_MS) {
+          // Let the song run to its end so the summary overlay appears.
+          await new Promise((r) => setTimeout(r, Number(process.env.KARAOKE_SHOT_SUMMARY_WAIT_MS)));
+          const summary = await win.webContents.executeJavaScript(`(() => {
+            const el = document.getElementById("summary");
+            if (!el || el.hidden) return "no summary";
+            return JSON.stringify({
+              total: document.getElementById("sum-total").textContent,
+              sub: document.getElementById("sum-sub").textContent,
+              rows: document.querySelectorAll("#sum-phrases .sum-row").length,
+            });
+          })()`);
+          console.log("[karaoke-now] summary probe:", summary);
+        }
       }
       const img = await win.webContents.capturePage();
       const name = process.env.KARAOKE_SHOT_HASH ? "player.png" : "library.png";

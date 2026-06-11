@@ -86,6 +86,12 @@ KARAOKE_SHOT_PLAY=1 npx electron .       # screenshot + playback probe, then qui
 # KARAOKE_FAKE_MIC=440 swaps the mic for a 440 Hz oscillator: the probe then
 # clicks Mic, logs estimate counts + median f0, and the screenshot shows the
 # live trace — the whole Phase 3 loop verified without a microphone.
+
+# Scoring e2e: constant-pitch synth bundle + fake mic at the same frequency
+# should land ~100%. KARAOKE_SHOT_SUMMARY_WAIT_MS keeps the window alive past
+# the song's end so the summary overlay appears and gets probed + screenshotted.
+KARAOKE_SYNTH_DUR_S=8 KARAOKE_SYNTH_CONST_HZ=440 \
+  sidecar/.venv/bin/python scripts/make_synth_bundle.py
 ```
 
 ## Status / roadmap
