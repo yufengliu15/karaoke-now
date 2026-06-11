@@ -30,7 +30,7 @@ python3 -m venv .venv
 npm start
 ```
 
-"Add song" → pick an audio file → watch the pipeline chips (tags → Demucs → pitch → lyrics → bundle). First run downloads Demucs/CREPE model weights. The `fast` toggle uses CREPE-tiny for a quicker, rougher contour.
+"Add song" → pick an audio file → watch the pipeline chips (tags → Demucs → pitch → lyrics → bundle). First run downloads Demucs/CREPE model weights. The `fast` toggle (default on) uses CREPE-tiny for a quicker, rougher contour — CREPE-full costs ~28 min CPU on a 3-minute song; untick it when you want the best reference.
 
 Click a library row to open the **playback screen**: instrumental audio, a scrolling reference pitch lane (canvas, semitone gridlines, now-line at 25%), and synced lyrics with the active line highlighted. Space or the button toggles play/pause; the slider seeks.
 
