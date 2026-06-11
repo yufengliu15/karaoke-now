@@ -38,6 +38,8 @@ Click a library row to open the **playback screen**: instrumental audio, a scrol
 
 The octave toggle picks the game you're playing: **Any octave** folds your pitch onto the melody, so only the note name has to match (sing it an octave down, still counts). **Exact octave** keeps your real register — sing an octave off and your bar drifts off the lane. First mic use prompts for macOS permission. Voice processing (echo cancellation, AGC) is disabled on the capture path — sing over headphones for best results, since the instrumental bleeding into the mic will confuse the detector.
 
+When the song ends (or you hit Back mid-song after singing), a **session summary** appears: total in-tune percent, then every lyric line with its own percent — sung frames within ±50 cents of the reference count, judged at the vibrato's center, with the first 80ms of each note forgiven. Not singing a line counts against you; instrumental lines show a dash. Scores are not saved anywhere: sing it again or let it go.
+
 The detector source lives in `wasm/yin.ts` (AssemblyScript); the compiled `renderer/worklet/yin.wasm` is committed, so `npm run build:wasm` is only needed after editing it.
 
 Bundles land in Electron's `userData/songs/<id>/`:
@@ -92,6 +94,9 @@ KARAOKE_SHOT_PLAY=1 npx electron .       # screenshot + playback probe, then qui
 # the song's end so the summary overlay appears and gets probed + screenshotted.
 KARAOKE_SYNTH_DUR_S=8 KARAOKE_SYNTH_CONST_HZ=440 \
   sidecar/.venv/bin/python scripts/make_synth_bundle.py
+KARAOKE_SONGS_DIR=/tmp/karaoke-test-songs KARAOKE_SHOT_DIR=/tmp/karaoke-shots \
+  KARAOKE_SHOT_HASH="#play/deadbeefdeadbeef" KARAOKE_SHOT_PLAY=1 \
+  KARAOKE_FAKE_MIC=440 KARAOKE_SHOT_SUMMARY_WAIT_MS=7000 npx electron .
 ```
 
 ## Status / roadmap
@@ -99,5 +104,5 @@ KARAOKE_SYNTH_DUR_S=8 KARAOKE_SYNTH_CONST_HZ=440 \
 - [x] **Phase 1 — song pipeline**: file picker → cached bundle (this repo, 2026-06-10)
 - [x] **Phase 2 — playback screen**: instrumental + scrolling lyrics + reference pitch lane (2026-06-10)
 - [x] **Phase 3 — live mic loop**: AudioWorklet + YIN-WASM, user pitch line over reference, <50ms mic-to-pixel (2026-06-10)
-- [ ] **Phase 4 — scoring**: in-tune-percent per phrase + session summary
+- [x] **Phase 4 — scoring**: in-tune-percent per phrase + session summary (2026-06-10)
 - Post-MVP: yt-dlp ingest, WhisperX forced-alignment fallback, key transposition
