@@ -56,7 +56,7 @@ export function scoreSession({ buckets, ref, lines = [], durationS, octaveMode =
   const o = { ...ref.opts, ...opts };
   const { refMidi, scorable, hopS } = ref;
   const n = refMidi.length;
-  const half = Math.max(0, Math.round(o.userMedianS / hopS));
+  const half = Math.max(0, Math.round(o.userMedianS / 2 / hopS));
 
   const inTune = new Uint8Array(n);
   for (let i = 0; i < n; i++) {
