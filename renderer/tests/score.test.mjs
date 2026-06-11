@@ -112,3 +112,59 @@ test("later writes overwrite earlier ones", () => {
   for (const [k] of buckets) buckets.set(k, 69); // re-sing in tune
   assert.equal(scoreSession(flatArgs(buckets)).totalPct, 100);
 });
+
+test("phrases split on LRC line stamps and score independently", () => {
+  const lines = [
+    { t: 0, text: "first line" },
+    { t: 1, text: "second line" },
+  ];
+  const buckets = sing(0, 100, 69); // only the first line is sung
+  // userMedianS 0: the ±30ms median window would bleed a few sung frames
+  // across the phrase boundary; this test pins boundary semantics, not the lever.
+  const res = scoreSession({ buckets, ref: flatRef(), lines, durationS: 2, opts: { userMedianS: 0 } });
+  assert.equal(res.phrases.length, 2);
+  assert.equal(res.phrases[0].pct, 100);
+  assert.equal(res.phrases[1].pct, 0);
+  assert.equal(res.totalPct, 50);
+});
+
+test("instrumental phrase scores null and is excluded from the total", () => {
+  const midis = [...Array(100).fill(69), ...Array(100).fill(null)];
+  const ref = prepRef(contourFrom(midis), { onsetGateS: 0 });
+  const lines = [
+    { t: 0, text: "sung line" },
+    { t: 1, text: "" }, // instrumental: no reference voicing
+  ];
+  const res = scoreSession({ buckets: sing(0, 100, 69), ref, lines, durationS: 2 });
+  assert.equal(res.phrases[1].pct, null);
+  assert.equal(res.totalPct, 100); // null phrase doesn't drag the total
+});
+
+test("melody before the first lyric becomes a leading ♪ phrase", () => {
+  const lines = [{ t: 1, text: "late line" }];
+  const res = scoreSession({ buckets: sing(0, 200, 69), ref: flatRef(), lines, durationS: 2 });
+  assert.equal(res.phrases.length, 2);
+  assert.equal(res.phrases[0].text, "♪");
+  assert.equal(res.phrases[0].pct, 100);
+});
+
+test("no leading phrase when the intro has no melody", () => {
+  const midis = [...Array(100).fill(null), ...Array(100).fill(69)];
+  const ref = prepRef(contourFrom(midis), { onsetGateS: 0 });
+  const lines = [{ t: 1, text: "only line" }];
+  const res = scoreSession({ buckets: sing(100, 200, 69), ref, lines, durationS: 2 });
+  assert.equal(res.phrases.length, 1);
+});
+
+test("total is frame-weighted, not a mean of phrase percents", () => {
+  const lines = [
+    { t: 0, text: "ten frames" },
+    { t: 0.1, text: "the rest" },
+  ];
+  const buckets = sing(0, 10, 69); // only the short phrase in tune
+  // userMedianS 0 for the same boundary-bleed reason as the phrase-split test.
+  const res = scoreSession({ buckets, ref: flatRef(), lines, durationS: 2, opts: { userMedianS: 0 } });
+  assert.equal(res.phrases[0].pct, 100);
+  assert.equal(res.phrases[1].pct, 0);
+  assert.equal(res.totalPct, 5); // 10/200 — not mean(100, 0) = 50
+});
