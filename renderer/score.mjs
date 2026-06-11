@@ -48,6 +48,74 @@ export function prepRef(contour, opts = {}) {
   return { refMidi, scorable, hopS, opts: o };
 }
 
-export function scoreSession() {
-  throw new Error("not implemented"); // Task 2
+// buckets: Map(frame index → sung midi, raw/unfolded), collected by the
+// player during a run. Later writes overwrite earlier ones, so re-singing a
+// section after a seek rescores it. Score = in-tune / scorable: frames the
+// reference sings but the user doesn't count against the percent.
+export function scoreSession({ buckets, ref, lines = [], durationS, octaveMode = "any", opts = {} }) {
+  const o = { ...ref.opts, ...opts };
+  const { refMidi, scorable, hopS } = ref;
+  const n = refMidi.length;
+  const half = Math.max(0, Math.round(o.userMedianS / hopS));
+
+  const inTune = new Uint8Array(n);
+  for (let i = 0; i < n; i++) {
+    if (!scorable[i]) continue;
+    const win = [];
+    for (let k = i - half; k <= i + half; k++) {
+      const m = buckets.get(k);
+      if (m !== undefined) win.push(m);
+    }
+    if (!win.length) continue;
+    win.sort((a, b) => a - b);
+    let cents = (win[win.length >> 1] - refMidi[i]) * 100;
+    if (octaveMode === "any") {
+      // Pitch-class distance: octave-down on an out-of-range song is
+      // legitimate karaoke, so only the note name has to match.
+      cents = ((cents % 1200) + 1200) % 1200;
+      if (cents > 600) cents -= 1200;
+    }
+    if (Math.abs(cents) <= o.tolCents) inTune[i] = 1;
+  }
+
+  // Phrase boundaries from LRC line stamps; no lyrics → one whole-song phrase.
+  const spans = [];
+  if (lines.length) {
+    if (lines[0].t > 0) spans.push({ text: "♪", t0: 0, t1: lines[0].t, lead: true });
+    lines.forEach((line, i) => {
+      spans.push({ text: line.text, t0: line.t, t1: lines[i + 1]?.t ?? durationS });
+    });
+  } else {
+    spans.push({ text: "", t0: 0, t1: durationS });
+  }
+
+  let totalScorable = 0;
+  let totalInTune = 0;
+  const phrases = [];
+  for (const span of spans) {
+    const i0 = Math.max(0, Math.round(span.t0 / hopS));
+    const i1 = Math.min(n, Math.round(span.t1 / hopS));
+    let sc = 0;
+    let it = 0;
+    for (let i = i0; i < i1; i++) {
+      sc += scorable[i];
+      it += inTune[i];
+    }
+    if (span.lead && !sc) continue; // intro with no melody: no row at all
+    totalScorable += sc;
+    totalInTune += it;
+    phrases.push({
+      text: span.text,
+      t0: span.t0,
+      t1: span.t1,
+      pct: sc ? Math.round((100 * it) / sc) : null,
+      scorableS: sc * hopS,
+    });
+  }
+
+  return {
+    totalPct: totalScorable ? Math.round((100 * totalInTune) / totalScorable) : null,
+    scoredS: totalScorable * hopS,
+    phrases,
+  };
 }

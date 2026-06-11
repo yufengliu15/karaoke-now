@@ -53,3 +53,62 @@ test("prepRef: median smoothing kills single-frame octave blips", () => {
   const ref = prepRef(contourFrom(midis), { onsetGateS: 0 });
   assert.ok(Math.abs(ref.refMidi[25] - 69) < 0.01);
 });
+
+// Constant reference at midi 69, onset gate disabled so frame math is exact.
+function flatRef(frames = 200) {
+  return prepRef(contourFrom(Array(frames).fill(69)), { onsetGateS: 0 });
+}
+const flatArgs = (buckets, octaveMode = "any") => ({
+  buckets,
+  ref: flatRef(),
+  lines: [],
+  durationS: 2,
+  octaveMode,
+});
+
+test("perfect unison scores 100", () => {
+  const res = scoreSession(flatArgs(sing(0, 200, 69)));
+  assert.equal(res.totalPct, 100);
+  assert.equal(res.scoredS, 2);
+});
+
+test("constant +100 cents scores 0", () => {
+  assert.equal(scoreSession(flatArgs(sing(0, 200, 70))).totalPct, 0);
+});
+
+test("half in tune scores 50", () => {
+  const buckets = new Map([...sing(0, 100, 69), ...sing(100, 200, 71)]);
+  assert.equal(scoreSession(flatArgs(buckets)).totalPct, 50);
+});
+
+test("octave down: 100 in any-octave mode, 0 in exact mode", () => {
+  assert.equal(scoreSession(flatArgs(sing(0, 200, 57))).totalPct, 100);
+  assert.equal(scoreSession(flatArgs(sing(0, 200, 57), "exact")).totalPct, 0);
+});
+
+test("silence scores 0 — not singing counts against you", () => {
+  assert.equal(scoreSession(flatArgs(new Map())).totalPct, 0);
+});
+
+test("nothing scorable in the reference scores null", () => {
+  const ref = prepRef(contourFrom(Array(50).fill(null)));
+  const res = scoreSession({ buckets: sing(0, 50, 69), ref, lines: [], durationS: 0.5 });
+  assert.equal(res.totalPct, null);
+});
+
+test("±60-cent vibrato at 6Hz is in tune after the 60ms median", () => {
+  const vib = (i) => 69 + 0.6 * Math.sin(2 * Math.PI * 6 * (i / 100));
+  assert.equal(scoreSession(flatArgs(sing(0, 200, vib))).totalPct, 100);
+});
+
+test("single-frame user blip is absorbed by the median window", () => {
+  const buckets = sing(0, 200, 69);
+  buckets.set(100, 81);
+  assert.equal(scoreSession(flatArgs(buckets)).totalPct, 100);
+});
+
+test("later writes overwrite earlier ones", () => {
+  const buckets = sing(0, 200, 81); // first pass: octave off everywhere
+  for (const [k] of buckets) buckets.set(k, 69); // re-sing in tune
+  assert.equal(scoreSession(flatArgs(buckets)).totalPct, 100);
+});
