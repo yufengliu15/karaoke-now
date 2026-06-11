@@ -1,4 +1,4 @@
-import { initPlayer, openPlayer, closePlayer } from "./player.mjs";
+import { initPlayer, openPlayer, closePlayer, maybeShowSummary } from "./player.mjs";
 
 const songsEl = document.getElementById("songs");
 const stagesEl = document.getElementById("stages");
@@ -96,7 +96,8 @@ function route() {
 
 window.addEventListener("hashchange", route);
 backBtn.addEventListener("click", () => {
-  location.hash = "";
+  // A sung run gets its verdict before leaving; second Back actually leaves.
+  if (!maybeShowSummary()) location.hash = "";
 });
 
 window.karaoke.onProgress((msg) => {

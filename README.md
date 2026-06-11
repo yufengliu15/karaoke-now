@@ -30,13 +30,15 @@ python3 -m venv .venv
 npm start
 ```
 
-"Add song" → pick an audio file → watch the pipeline chips (tags → Demucs → pitch → lyrics → bundle). First run downloads Demucs/CREPE model weights. The `fast` toggle uses CREPE-tiny for a quicker, rougher contour.
+"Add song" → pick an audio file → watch the pipeline chips (tags → Demucs → pitch → lyrics → bundle). First run downloads Demucs/CREPE model weights. The `fast` toggle (default on) uses CREPE-tiny for a quicker, rougher contour — CREPE-full costs ~28 min CPU on a 3-minute song; untick it when you want the best reference.
 
 Click a library row to open the **playback screen**: instrumental audio, a scrolling reference pitch lane (canvas, semitone gridlines, now-line at 25%), and synced lyrics with the active line highlighted. Space or the button toggles play/pause; the slider seeks.
 
 **Mic** turns on the live loop: your pitch is detected in real time (YIN compiled to WASM, running in an AudioWorklet, ~5ms updates) and drawn as green held-note bars over the reference — the same semitone quantization the reference lane uses, with a short median window plus onset/switch hysteresis so vibrato and scoops don't wiggle the bar. The transport shows the note you're holding.
 
 The octave toggle picks the game you're playing: **Any octave** folds your pitch onto the melody, so only the note name has to match (sing it an octave down, still counts). **Exact octave** keeps your real register — sing an octave off and your bar drifts off the lane. First mic use prompts for macOS permission. Voice processing (echo cancellation, AGC) is disabled on the capture path — sing over headphones for best results, since the instrumental bleeding into the mic will confuse the detector.
+
+When the song ends (or you hit Back mid-song after singing), a **session summary** appears: total in-tune percent, then every lyric line with its own percent — sung frames within ±50 cents of the reference count, judged at the vibrato's center, with the first 80ms of each note forgiven. Not singing a line counts against you; instrumental lines show a dash. Scores are not saved anywhere: sing it again or let it go.
 
 The detector source lives in `wasm/yin.ts` (AssemblyScript); the compiled `renderer/worklet/yin.wasm` is committed, so `npm run build:wasm` is only needed after editing it.
 
@@ -86,6 +88,15 @@ KARAOKE_SHOT_PLAY=1 npx electron .       # screenshot + playback probe, then qui
 # KARAOKE_FAKE_MIC=440 swaps the mic for a 440 Hz oscillator: the probe then
 # clicks Mic, logs estimate counts + median f0, and the screenshot shows the
 # live trace — the whole Phase 3 loop verified without a microphone.
+
+# Scoring e2e: constant-pitch synth bundle + fake mic at the same frequency
+# should land ~100%. KARAOKE_SHOT_SUMMARY_WAIT_MS keeps the window alive past
+# the song's end so the summary overlay appears and gets probed + screenshotted.
+KARAOKE_SYNTH_DUR_S=8 KARAOKE_SYNTH_CONST_HZ=440 \
+  sidecar/.venv/bin/python scripts/make_synth_bundle.py
+KARAOKE_SONGS_DIR=/tmp/karaoke-test-songs KARAOKE_SHOT_DIR=/tmp/karaoke-shots \
+  KARAOKE_SHOT_HASH="#play/deadbeefdeadbeef" KARAOKE_SHOT_PLAY=1 \
+  KARAOKE_FAKE_MIC=440 KARAOKE_SHOT_SUMMARY_WAIT_MS=7000 npx electron .
 ```
 
 ## Status / roadmap
@@ -93,5 +104,5 @@ KARAOKE_SHOT_PLAY=1 npx electron .       # screenshot + playback probe, then qui
 - [x] **Phase 1 — song pipeline**: file picker → cached bundle (this repo, 2026-06-10)
 - [x] **Phase 2 — playback screen**: instrumental + scrolling lyrics + reference pitch lane (2026-06-10)
 - [x] **Phase 3 — live mic loop**: AudioWorklet + YIN-WASM, user pitch line over reference, <50ms mic-to-pixel (2026-06-10)
-- [ ] **Phase 4 — scoring**: in-tune-percent per phrase + session summary
+- [x] **Phase 4 — scoring**: in-tune-percent per phrase + session summary (2026-06-10)
 - Post-MVP: yt-dlp ingest, WhisperX forced-alignment fallback, key transposition
