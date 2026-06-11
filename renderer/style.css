@@ -264,3 +264,92 @@ section {
   flex: 1;
   accent-color: var(--accent);
 }
+
+/* ---- session summary (Phase 4) ---- */
+
+#summary {
+  position: fixed;
+  inset: 0;
+  background: rgba(16, 16, 20, 0.78);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+}
+
+.summary-card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 22px 26px;
+  width: min(560px, 86vw);
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.sum-total {
+  font-size: 44px;
+  font-weight: 700;
+  color: var(--ok);
+  text-align: center;
+}
+
+.sum-sub {
+  color: var(--muted);
+  font-size: 13px;
+  text-align: center;
+}
+
+#sum-phrases {
+  overflow-y: auto;
+  margin-top: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.sum-row {
+  display: grid;
+  grid-template-columns: 1fr 120px 44px;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+}
+.sum-row.dim { color: var(--muted); opacity: 0.6; }
+.sum-text { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.sum-bar {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--border);
+  overflow: hidden;
+}
+.sum-fill {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--ok);
+}
+
+.sum-pct {
+  text-align: right;
+  font: 13px ui-monospace, "SF Mono", Menlo, monospace;
+}
+
+.sum-actions {
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+  margin-top: 8px;
+}
+#sum-done {
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 7px;
+  padding: 8px 16px;
+  cursor: pointer;
+}
+#sum-done:hover { border-color: var(--muted); }

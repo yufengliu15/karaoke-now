@@ -13,6 +13,7 @@ import {
 } from "./pitchlane.mjs";
 import { LiveNoteTracker } from "./livenotes.mjs";
 import { startMic } from "./mic.mjs";
+import { prepRef, scoreSession, SCORE_OPTS } from "./score.mjs";
 
 const WINDOW_S = 8; // seconds of contour visible across the lane
 const LEAD_FRAC = 0.25; // now-line position as a fraction of lane width
@@ -34,9 +35,10 @@ let rafId = 0;
 let currentSession = null;
 let mic = null; // live mic engine, one at a time, stopped on player close
 let lastVoicedMs = 0; // wall-clock time of the last voiced estimate
+let summaryFromBack = false; // Done returns to library when Back opened the summary
 
 export function initPlayer() {
-  for (const id of ["view-player", "back", "p-title", "p-artist", "p-clock", "lane", "lyrics", "lyrics-empty", "playpause", "mic", "mic-note", "octave", "seek"]) {
+  for (const id of ["view-player", "back", "p-title", "p-artist", "p-clock", "lane", "lyrics", "lyrics-empty", "playpause", "mic", "mic-note", "octave", "seek", "summary", "sum-total", "sum-sub", "sum-phrases", "sum-again", "sum-done"]) {
     els[id.replace(/-(\w)/g, (_, c) => c.toUpperCase())] = document.getElementById(id);
   }
   const style = getComputedStyle(document.body);
@@ -69,6 +71,18 @@ export function initPlayer() {
   });
   els.seek.addEventListener("pointerdown", () => state && (state.scrubbing = true));
   els.seek.addEventListener("pointerup", () => state && (state.scrubbing = false));
+  els.sumAgain.addEventListener("click", () => {
+    dismissSummary();
+    if (!state) return;
+    state.audio.currentTime = 0;
+    state.liveNotes.reset();
+    state.audio.play().catch(() => {});
+  });
+  els.sumDone.addEventListener("click", () => {
+    const leave = summaryFromBack;
+    dismissSummary();
+    if (leave) location.hash = "";
+  });
   new ResizeObserver(resizeLane).observe(els.lane);
 }
 
@@ -99,6 +113,8 @@ export async function openPlayer(id, { t = 0, autoplay = false } = {}) {
     wordIdx: -1,
     scrubbing: false,
     liveNotes: new LiveNoteTracker(), // live mic estimates → stable note bars
+    run: new Map(), // frame index → sung midi (raw); the session being scored
+    ref: null, // prepRef output; null means no contour, nothing to score
     // Streamed wav reports duration=Infinity until fully buffered; meta.json is the truth.
     durationS: meta?.duration_s || 0,
   };
@@ -115,12 +131,14 @@ export async function openPlayer(id, { t = 0, autoplay = false } = {}) {
   audio.addEventListener("durationchange", syncDuration);
   audio.addEventListener("play", () => (els.playpause.textContent = "Pause"));
   audio.addEventListener("pause", () => (els.playpause.textContent = "Play"));
+  audio.addEventListener("ended", () => showSummary(false));
 
   if (contour) {
     state.notes = buildNotes(contour);
     const fit = fitMidiRange(contour);
     // Whole semitones so gridlines and note bars land on the same rows.
     state.range = { lo: Math.floor(fit.lo), hi: Math.ceil(fit.hi) };
+    state.ref = prepRef(contour);
   }
   state.lines = lrcText ? parseLrc(lrcText).lines : [];
   renderLyricsList();
@@ -134,6 +152,8 @@ export function closePlayer() {
   currentSession = null;
   cancelAnimationFrame(rafId);
   stopMic();
+  els.summary.hidden = true;
+  summaryFromBack = false;
   if (state) {
     state.audio.pause();
     state.audio.removeAttribute("src");
@@ -177,6 +197,61 @@ function stopMic() {
   els.micNote.textContent = "";
 }
 
+function showSummary(fromBack) {
+  if (!state || !state.ref || !state.run.size || !els.summary.hidden) return false;
+  state.audio.pause();
+  summaryFromBack = fromBack;
+  renderSummary(
+    scoreSession({
+      buckets: state.run,
+      ref: state.ref,
+      lines: state.lines,
+      durationS: state.durationS,
+      octaveMode,
+    }),
+  );
+  els.summary.hidden = false;
+  return true;
+}
+
+// Back-button hook (called from app.js): first Back with a sung run shows
+// the verdict instead of leaving; the next Back (or Done) actually leaves.
+export function maybeShowSummary() {
+  return showSummary(true);
+}
+
+function dismissSummary() {
+  els.summary.hidden = true;
+  summaryFromBack = false;
+  if (state) state.run.clear(); // a dismissed score is gone; next sing starts clean
+}
+
+function renderSummary(res) {
+  els.sumTotal.textContent = res.totalPct === null ? "—" : `${res.totalPct}%`;
+  els.sumSub.textContent =
+    `${res.scoredS.toFixed(1)}s scored · ${OCTAVE_MODES[octaveMode]} · ±${SCORE_OPTS.tolCents}¢`;
+  els.sumPhrases.textContent = "";
+  for (const p of res.phrases) {
+    const row = document.createElement("div");
+    row.className = "sum-row";
+    if (p.pct === null) row.classList.add("dim");
+    const text = document.createElement("span");
+    text.className = "sum-text";
+    text.textContent = p.text || "♪";
+    const bar = document.createElement("span");
+    bar.className = "sum-bar";
+    const fill = document.createElement("span");
+    fill.className = "sum-fill";
+    fill.style.width = `${p.pct ?? 0}%`;
+    bar.appendChild(fill);
+    const pct = document.createElement("span");
+    pct.className = "sum-pct";
+    pct.textContent = p.pct === null ? "—" : `${p.pct}%`;
+    row.append(text, bar, pct);
+    els.sumPhrases.appendChild(row);
+  }
+}
+
 function onMicSample(d) {
   // Probe: lets the headless harness assert the loop end to end (fake mic in,
   // ~fakeHz out). Negligible cost when nobody reads it.
@@ -202,6 +277,10 @@ function onMicSample(d) {
   // from the song clock pins the sample to the moment it was actually sung.
   const songT = state.audio.currentTime - Math.max(0, mic.ctx.currentTime - d.t);
   state.liveNotes.push(songT, midi);
+
+  // Scoring collects the raw register — octave folding is applied at scoring
+  // time from the mode toggle, not baked into the buckets.
+  if (state.ref) state.run.set(Math.round(songT / state.ref.hopS), hzToMidi(d.f0));
 
   const held = state.liveNotes.note();
   els.micNote.textContent = held === null ? "" : noteName(held);
