@@ -295,6 +295,7 @@ section {
   color: var(--ok);
   text-align: center;
 }
+.sum-total.dim { color: var(--muted); }
 
 .sum-sub {
   color: var(--muted);

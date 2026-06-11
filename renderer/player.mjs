@@ -59,7 +59,7 @@ export function initPlayer() {
     els.octave.textContent = OCTAVE_MODES[octaveMode];
   });
   document.addEventListener("keydown", (e) => {
-    if (state && e.code === "Space" && e.target.tagName !== "INPUT") {
+    if (state && els.summary.hidden && e.code === "Space" && e.target.tagName !== "INPUT") {
       e.preventDefault();
       togglePlay();
     }
@@ -228,6 +228,7 @@ function dismissSummary() {
 
 function renderSummary(res) {
   els.sumTotal.textContent = res.totalPct === null ? "—" : `${res.totalPct}%`;
+  els.sumTotal.classList.toggle("dim", res.totalPct === null);
   els.sumSub.textContent =
     `${res.scoredS.toFixed(1)}s scored · ${OCTAVE_MODES[octaveMode]} · ±${SCORE_OPTS.tolCents}¢`;
   els.sumPhrases.textContent = "";
@@ -270,7 +271,8 @@ function onMicSample(d) {
   // In "any octave" mode the sung pitch is folded into the lane before the
   // tracker sees it, so the held bar lands on the reference melody. In
   // "exact" mode the raw register goes through untouched.
-  let midi = hzToMidi(d.f0);
+  const rawMidi = hzToMidi(d.f0);
+  let midi = rawMidi;
   if (octaveMode === "any") midi = foldMidiToRange(midi, state.range.lo, state.range.hi);
 
   // d.t is the ctx time of the analysis-window center; subtracting its age
@@ -280,7 +282,7 @@ function onMicSample(d) {
 
   // Scoring collects the raw register — octave folding is applied at scoring
   // time from the mode toggle, not baked into the buckets.
-  if (state.ref) state.run.set(Math.round(songT / state.ref.hopS), hzToMidi(d.f0));
+  if (state.ref) state.run.set(Math.round(songT / state.ref.hopS), rawMidi);
 
   const held = state.liveNotes.note();
   els.micNote.textContent = held === null ? "" : noteName(held);
