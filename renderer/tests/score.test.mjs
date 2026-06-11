@@ -72,6 +72,13 @@ test("perfect unison scores 100", () => {
   assert.equal(res.scoredS, 2);
 });
 
+test("no lyrics → a single phrase spans the whole song", () => {
+  const res = scoreSession(flatArgs(sing(0, 200, 69)));
+  assert.equal(res.phrases.length, 1);
+  assert.equal(res.phrases[0].t0, 0);
+  assert.equal(res.phrases[0].t1, 2);
+});
+
 test("constant +100 cents scores 0", () => {
   assert.equal(scoreSession(flatArgs(sing(0, 200, 70))).totalPct, 0);
 });

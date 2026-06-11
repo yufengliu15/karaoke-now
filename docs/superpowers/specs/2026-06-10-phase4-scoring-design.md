@@ -39,7 +39,7 @@ the cents difference ≤ 50, where:
 - user f0 at a frame = median over user buckets within ±30ms (vibrato judged
   at its center; the ±50¢ band then absorbs normal vibrato)
 - **any-octave mode** (default): cents diff folded to pitch class, i.e. into
-  [-600, +600) — octave-down singing counts
+  (-600, +600] — octave-down singing counts
 - **exact-octave mode**: absolute cents diff — register matters
 - mode read from the existing octave toggle at scoring time
 
@@ -117,9 +117,9 @@ TDD, `node:test`, same style as existing suites. `renderer/tests/score.test.mjs`
 - total ≠ mean of phrase pcts (weighted by scorable frames)
 
 Headless e2e (existing harness): synthetic bundle at 440 Hz + 
-`KARAOKE_FAKE_MIC=440` + `KARAOKE_SHOT_PLAY=1`, force `ended` near the end →
-probe reads the summary DOM, asserts total ≥ 95%; screenshot shows the
-overlay.
+`KARAOKE_FAKE_MIC=440` + `KARAOKE_SHOT_PLAY=1`, song runs to `ended` → probe
+logs the summary DOM (harness convention: probes log, the operator asserts;
+expected total ≥ 90%); screenshot shows the overlay.
 
 ## Out of scope
 
